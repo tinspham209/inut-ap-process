@@ -8,11 +8,15 @@ import {
   type ServerLogger,
 } from "./logger.js";
 import { ReconciliationConflictError } from "./reconcile.js";
-import type { ResultCardReport } from "./result-card.js";
+import type {
+  CategorySpend,
+  ResultCardReport,
+} from "./result-card.js";
 import { TrelloApiError } from "./trello/client.js";
 
 export interface ReconciliationSuccessBody extends ResultCardReport {
   status: "success";
+  spentByExpenseType: CategorySpend[];
   updatedCardUrl: string;
 }
 
@@ -110,9 +114,34 @@ function isValidSuccessBody(
   ) {
     return false;
   }
+
+  if (!Array.isArray(body.spentByExpenseType)) {
+    return false;
+  }
+  const categoryNames = new Set<string>();
+  let categoryTotal = 0n;
+  for (const category of body.spentByExpenseType) {
+    if (
+      typeof category !== "object" ||
+      category === null ||
+      typeof category.expenseType !== "string" ||
+      category.expenseType.trim().length === 0 ||
+      category.expenseType !== category.expenseType.trim() ||
+      /[\r\n\u0000-\u001f\u007f]/.test(category.expenseType) ||
+      categoryNames.has(category.expenseType.trim()) ||
+      !Number.isSafeInteger(category.spentVnd) ||
+      category.spentVnd <= 0
+    ) {
+      return false;
+    }
+    categoryNames.add(category.expenseType.trim());
+    categoryTotal += BigInt(category.spentVnd);
+  }
+
   return (
     BigInt(body.totalSpentVnd) ===
-    BigInt(body.cashSpentVnd) + BigInt(body.bankTransferSpentVnd)
+      BigInt(body.cashSpentVnd) + BigInt(body.bankTransferSpentVnd) &&
+    categoryTotal === BigInt(body.totalSpentVnd)
   );
 }
 

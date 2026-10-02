@@ -8,7 +8,8 @@ import {
 export type ReconciliationFailureCode =
   | "INVALID_PAID_CARD_DATA"
   | "ARCHIVED_PAID_CARD"
-  | "TOTAL_OVERFLOW";
+  | "TOTAL_OVERFLOW"
+  | "CATEGORY_TOTAL_MISMATCH";
 
 export type ReconciliationResult =
   | {
@@ -18,6 +19,10 @@ export type ReconciliationResult =
       totalSpentVnd: number;
       cashSpentVnd: number;
       bankTransferSpentVnd: number;
+      spentByExpenseType: Array<{
+        expenseType: string;
+        spentVnd: number;
+      }>;
     }
   | {
       ok: false;
@@ -47,9 +52,19 @@ export function reconcilePaidCards(
   cards: readonly PaidCardInput[],
   paidListId: string,
   asOf: Date,
+  expenseTypeOrder: readonly string[],
 ): ReconciliationResult {
   const reportMonth = monthInVietnam(asOf);
-  const validation = validatePaidCards(cards, paidListId, asOf);
+  const orderedExpenseTypes = [
+    ...new Set(expenseTypeOrder.map((expenseType) => expenseType.trim())),
+  ];
+  const allowedExpenseTypes = new Set(orderedExpenseTypes);
+  const validation = validatePaidCards(
+    cards,
+    paidListId,
+    asOf,
+    allowedExpenseTypes,
+  );
 
   if (validation.archivedPaidCards.length > 0) {
     return {
@@ -70,11 +85,17 @@ export function reconcilePaidCards(
 
   let cashSpentVnd = 0n;
   let bankTransferSpentVnd = 0n;
+  const categoryTotals = new Map<string, bigint>();
   for (const card of validation.validCards) {
     if (monthInVietnam(new Date(card.fields.paidAt)) !== reportMonth) {
       continue;
     }
     const amount = BigInt(card.fields.amountVnd);
+    const expenseType = card.fields.expenseType.trim();
+    categoryTotals.set(
+      expenseType,
+      (categoryTotals.get(expenseType) ?? 0n) + amount,
+    );
     if (card.fields.paymentMethod === "Tiền mặt") {
       cashSpentVnd += amount;
     } else {
@@ -83,14 +104,27 @@ export function reconcilePaidCards(
   }
 
   const totalSpentVnd = cashSpentVnd + bankTransferSpentVnd;
+  const categoryTotalVnd = [...categoryTotals.values()].reduce(
+    (sum, amount) => sum + amount,
+    0n,
+  );
   if (
     cashSpentVnd > MAX_SAFE_TOTAL ||
     bankTransferSpentVnd > MAX_SAFE_TOTAL ||
-    totalSpentVnd > MAX_SAFE_TOTAL
+    totalSpentVnd > MAX_SAFE_TOTAL ||
+    categoryTotalVnd > MAX_SAFE_TOTAL
   ) {
     return {
       ok: false,
       code: "TOTAL_OVERFLOW",
+      issues: [],
+      archivedPaidCards: [],
+    };
+  }
+  if (categoryTotalVnd !== totalSpentVnd) {
+    return {
+      ok: false,
+      code: "CATEGORY_TOTAL_MISMATCH",
       issues: [],
       archivedPaidCards: [],
     };
@@ -103,5 +137,11 @@ export function reconcilePaidCards(
     totalSpentVnd: Number(totalSpentVnd),
     cashSpentVnd: Number(cashSpentVnd),
     bankTransferSpentVnd: Number(bankTransferSpentVnd),
+    spentByExpenseType: orderedExpenseTypes.flatMap((expenseType) => {
+      const spentVnd = categoryTotals.get(expenseType) ?? 0n;
+      return spentVnd > 0n
+        ? [{ expenseType, spentVnd: Number(spentVnd) }]
+        : [];
+    }),
   };
 }

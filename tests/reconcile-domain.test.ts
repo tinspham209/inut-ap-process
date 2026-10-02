@@ -5,6 +5,7 @@ import type { ParsedPaidFields } from "../src/trello/amazing-fields.js";
 
 const paidListId = "synthetic-paid-list-id";
 const asOf = new Date("2026-09-29T12:00:00.000Z");
+const defaultExpenseTypeOrder = ["Synthetic expense"];
 
 const baseFields: ParsedPaidFields = {
   amountVnd: 2_000_000,
@@ -37,10 +38,23 @@ function success(
   return result;
 }
 
+function reconcile(
+  cards: readonly PaidCardInput[],
+  expectedMonthAsOf: Date = asOf,
+  expenseTypeOrder: readonly string[] = defaultExpenseTypeOrder,
+) {
+  return reconcilePaidCards(
+    cards,
+    paidListId,
+    expectedMonthAsOf,
+    expenseTypeOrder,
+  );
+}
+
 describe("Paid-card reconciliation domain", () => {
   it("sums cash and transfer payments for the Vietnam reporting month", () => {
     const result = success(
-      reconcilePaidCards(
+      reconcile(
         [
           paidCard("synthetic-cash-card"),
           paidCard("synthetic-bank-card", {
@@ -54,7 +68,6 @@ describe("Paid-card reconciliation domain", () => {
             },
           }),
         ],
-        paidListId,
         asOf,
       ),
     );
@@ -66,22 +79,26 @@ describe("Paid-card reconciliation domain", () => {
       totalSpentVnd: 5_000_000,
       cashSpentVnd: 2_000_000,
       bankTransferSpentVnd: 3_000_000,
+      spentByExpenseType: [
+        { expenseType: "Synthetic expense", spentVnd: 5_000_000 },
+      ],
     });
   });
 
   it("returns zeros only after a successful run with no current-month Paid cards", () => {
-    const result = success(reconcilePaidCards([], paidListId, asOf));
+    const result = success(reconcile([], asOf, ["First", "Second"]));
 
     expect(result).toMatchObject({
       totalSpentVnd: 0,
       cashSpentVnd: 0,
       bankTransferSpentVnd: 0,
+      spentByExpenseType: [],
     });
   });
 
   it("ignores non-Paid and archived non-Paid cards", () => {
     const result = success(
-      reconcilePaidCards(
+      reconcile(
         [
           paidCard("synthetic-requesting", {
             idList: "synthetic-requesting-list",
@@ -98,7 +115,6 @@ describe("Paid-card reconciliation domain", () => {
             closed: true,
           }),
         ],
-        paidListId,
         asOf,
       ),
     );
@@ -109,7 +125,7 @@ describe("Paid-card reconciliation domain", () => {
   it("counts a duplicate card ID at most once", () => {
     const card = paidCard("synthetic-duplicate-card");
     const result = success(
-      reconcilePaidCards([card, card], paidListId, asOf),
+      reconcile([card, card]),
     );
 
     expect(result.totalSpentVnd).toBe(2_000_000);
@@ -127,7 +143,7 @@ describe("Paid-card reconciliation domain", () => {
     });
     const currentMonthStart = new Date("2026-08-31T17:00:00.000Z");
     const result = success(
-      reconcilePaidCards([olderCard], paidListId, currentMonthStart),
+      reconcile([olderCard], currentMonthStart),
     );
 
     expect(result.month).toBe("09/2026");
@@ -155,9 +171,8 @@ describe("Paid-card reconciliation domain", () => {
     });
 
     const result = success(
-      reconcilePaidCards(
+      reconcile(
         [before, atStart],
-        paidListId,
         new Date("2026-08-31T17:00:00.000Z"),
       ),
     );
@@ -186,9 +201,8 @@ describe("Paid-card reconciliation domain", () => {
       },
     });
 
-    const result = reconcilePaidCards(
+    const result = reconcile(
       [invalidTitle, invalidDate],
-      paidListId,
       asOf,
     );
 
@@ -221,12 +235,11 @@ describe("Paid-card reconciliation domain", () => {
   });
 
   it("fails the entire run for archived Paid cards and identifies the card", () => {
-    const result = reconcilePaidCards(
+    const result = reconcile(
       [
         paidCard("synthetic-archived-paid", { closed: true }),
         paidCard("synthetic-active-paid"),
       ],
-      paidListId,
       asOf,
     );
 
@@ -256,7 +269,7 @@ describe("Paid-card reconciliation domain", () => {
       },
     });
 
-    const result = reconcilePaidCards([future, nonIntegerAmount], paidListId, asOf);
+    const result = reconcile([future, nonIntegerAmount]);
 
     expect(result).toMatchObject({
       ok: false,
@@ -289,7 +302,7 @@ describe("Paid-card reconciliation domain", () => {
     });
 
     expect(
-      reconcilePaidCards([olderInvalidCard], paidListId, asOf),
+      reconcile([olderInvalidCard]),
     ).toMatchObject({
       ok: false,
       code: "INVALID_PAID_CARD_DATA",
@@ -304,7 +317,7 @@ describe("Paid-card reconciliation domain", () => {
   });
 
   it("rejects unsafe aggregate totals instead of rounding VND", () => {
-    const result = reconcilePaidCards(
+    const result = reconcile(
       [
         paidCard("synthetic-max-safe", {
           fields: {
@@ -319,13 +332,143 @@ describe("Paid-card reconciliation domain", () => {
           },
         }),
       ],
-      paidListId,
       asOf,
     );
 
     expect(result).toMatchObject({
       ok: false,
       code: "TOTAL_OVERFLOW",
+    });
+  });
+
+  it("groups paid amounts by category across methods in CFG option order", () => {
+    const optionOrder = ["Travel", "Office", "Utilities", "Other"];
+    const cards = [
+      paidCard("synthetic-office-cash", {
+        fields: {
+          status: "valid",
+          values: {
+            ...baseFields,
+            expenseType: "Office",
+            amountVnd: 1_000_000,
+          },
+        },
+      }),
+      paidCard("synthetic-travel-bank", {
+        fields: {
+          status: "valid",
+          values: {
+            ...baseFields,
+            expenseType: "Travel",
+            amountVnd: 2_000_000,
+            paymentMethod: "Chuyển khoản",
+          },
+        },
+      }),
+      paidCard("synthetic-office-bank", {
+        fields: {
+          status: "valid",
+          values: {
+            ...baseFields,
+            expenseType: "Office",
+            amountVnd: 500_000,
+            paymentMethod: "Chuyển khoản",
+          },
+        },
+      }),
+      paidCard("synthetic-old-other", {
+        fields: {
+          status: "valid",
+          values: {
+            ...baseFields,
+            expenseType: "Other",
+            amountVnd: 9_000_000,
+            paidAt: "2026-08-01T03:00:00.000Z",
+          },
+        },
+      }),
+    ];
+
+    const result = success(reconcile(cards, asOf, optionOrder));
+
+    expect(result.cashSpentVnd).toBe(1_000_000);
+    expect(result.bankTransferSpentVnd).toBe(2_500_000);
+    expect(result.totalSpentVnd).toBe(3_500_000);
+    expect(result.spentByExpenseType).toEqual([
+      { expenseType: "Travel", spentVnd: 2_000_000 },
+      { expenseType: "Office", spentVnd: 1_500_000 },
+    ]);
+    expect(
+      result.spentByExpenseType.reduce((sum, item) => sum + item.spentVnd, 0),
+    ).toBe(result.totalSpentVnd);
+  });
+
+  it("omits zero-spend options and deduplicates repeated option labels", () => {
+    const result = success(
+      reconcile(
+        [
+          paidCard("synthetic-category-paid", {
+            fields: {
+              status: "valid",
+              values: { ...baseFields, expenseType: "Office" },
+            },
+          }),
+        ],
+        asOf,
+        ["Office", "Travel", "Office", "Utilities"],
+      ),
+    );
+
+    expect(result.spentByExpenseType).toEqual([
+      { expenseType: "Office", spentVnd: 2_000_000 },
+    ]);
+  });
+
+  it("normalizes category labels consistently with configured options", () => {
+    const result = success(
+      reconcile(
+        [
+          paidCard("synthetic-whitespace-category", {
+            fields: {
+              status: "valid",
+              values: { ...baseFields, expenseType: " Office " },
+            },
+          }),
+        ],
+        asOf,
+        ["Office"],
+      ),
+    );
+
+    expect(result.spentByExpenseType).toEqual([
+      { expenseType: "Office", spentVnd: 2_000_000 },
+    ]);
+  });
+
+  it("rejects a paid card whose category is not present in the configured option order", () => {
+    const result = reconcile(
+      [
+        paidCard("synthetic-unmapped-category", {
+          fields: {
+            status: "valid",
+            values: { ...baseFields, expenseType: "Unknown category" },
+          },
+        }),
+      ],
+      asOf,
+      ["Office", "Travel"],
+    );
+
+    expect(result).toMatchObject({
+      ok: false,
+      code: "INVALID_PAID_CARD_DATA",
+      issues: [
+        {
+          cardId: "synthetic-unmapped-category",
+          field: "Loại chi phí",
+          reason: "invalid_value",
+        },
+      ],
     });
   });
 });

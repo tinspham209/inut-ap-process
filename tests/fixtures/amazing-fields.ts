@@ -9,6 +9,8 @@ export const fieldIds = {
   paymentMethod: "synthetic-payment-method-field",
   paymentDate: "synthetic-payment-date-field",
   expenseOption: "synthetic-expense-option",
+  travelOption: "synthetic-travel-option",
+  unusedExpenseOption: "synthetic-unused-expense-option",
   cashOption: "synthetic-cash-option",
   transferOption: "synthetic-transfer-option",
 } as const;
@@ -23,7 +25,11 @@ export const validFields: Array<Record<string, unknown>> = [
     id: fieldIds.expenseType,
     name: "Loại chi phí",
     type: "L",
-    options: [{ id: fieldIds.expenseOption, text: "Synthetic expense" }],
+    options: [
+      { id: fieldIds.expenseOption, text: "Synthetic expense" },
+      { id: fieldIds.travelOption, text: "Synthetic travel" },
+      { id: fieldIds.unusedExpenseOption, text: "Synthetic unused" },
+    ],
     multi: { enabled: false, method: "any" },
   },
   {

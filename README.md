@@ -156,9 +156,11 @@ do not share this state.
 The service reads all cards associated with the configured Paid list, including
 closed cards. An archived Paid card blocks publication and must be restored by
 the board owner; the service never unarchives or changes it. A valid run
-updates only the configured result card's five managed description lines and
-preserves other description content. VND display amounts use comma-separated
-thousands (for example, `1,000,000 VND`); API totals remain integer VND.
+updates only the configured result card's five fixed description lines and
+category block, preserving other description content. The display order is
+reporting month, last-updated timestamp, total, cash, bank transfer, then the
+category breakdown. VND display amounts use comma-separated thousands (for
+example, `1,000,000 VND`); API amounts remain integer VND.
 A field-data failure returns the complete
 `issues` list and attempts one Telegram summary; the message may be shortened,
 but the API issue list is not. A failed Telegram notification does not change
@@ -196,28 +198,24 @@ enforce role permissions.
 
 ## Gates before live testing or production
 
-The following are not established by mock tests or the read-only probe:
+Mock tests and read-only probes do not establish:
 
 - A host with HTTPS, one persistent instance, and a verified request deadline.
-- Permission for a successful test-board service run that writes only the
-  result-card description. Synthetic Paid cards must not be deleted or archived
-  for cleanup.
-- Human verification of Draft/Requesting/Approved/Paid/Discard assignees,
-  comments and archive procedure; Accounting's confirmation of expected
-  Vietnam-time display.
-- Operator access to the full issue list when Telegram truncates its summary,
-  and real host/cron duration at the expected Paid-card count.
-- G06: owner acceptance or redesign for cooldown reset on restart.
-- G08: owner decision on the remaining race after Trello read-back; Trello
-  conditional/atomic writes have not been established.
-- G09: verify whether Trello Automation exposes the server's `429` and
-  `Retry-After` to the button user; if not, update the approved operator
-  expectation.
-- A05: owner approval of the Telegram Bot API's required token-bearing HTTPS
-  upstream path, with URL/exception redaction, **before any live Telegram
-  send**.
+- Authenticated button/cron behavior, real host/cron duration at the expected
+  Paid-card count, and the cron provider's HTTP-failure alert.
+- Operator access to the full issue list when Telegram truncates its summary.
+- Any outstanding evidence for G01–G05/G07; owner decisions for G06/G08/A05
+  and the reported G09 UI observation are recorded in `docs/plan.md`.
 
-Do not enable live Telegram, cron/Automation, or production until the applicable
-gates and permissions are resolved. The currently configured test board has
-an archived card associated with Paid; do not modify it without the board
-owner's explicit direction.
+The owner authorized limited local/test-board checks that update only the
+configured result-card description after read-only preflight. This does not
+authorize edits to Paid source cards, production writes, or enabling recurring
+cron/Automation. The owner reports that the local result-card display and
+human workflow/accounting checks look good; the shared screenshot is not stored
+here because it contains financial data. Do not send live Telegram alerts
+unless separately approved for the private test chat.
+
+Do not enable production until the remaining gates are resolved. If read-only
+preflight finds an archived Paid card, stop and ask the board owner to restore
+the test fixture; the service never changes its status. Never archive or delete
+a Paid card for test cleanup.

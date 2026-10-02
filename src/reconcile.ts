@@ -13,7 +13,8 @@ import type {
 import {
   renderResultDescription,
   ResultCardDescriptionLimitError,
-  type ResultCardReport,
+  ResultCardReportError,
+  type ResultCardReportWithCategories,
 } from "./result-card.js";
 import {
   notifyPaidDataIssues,
@@ -185,7 +186,7 @@ export async function updateResultCardSafely(
   client: ResultCardServiceClient,
   pluginId: string,
   initialSnapshot: ReconciliationSnapshot,
-  report: ResultCardReport,
+  report: ResultCardReportWithCategories,
 ): Promise<{ updatedCardUrl: string }> {
   const description = renderResultDescription(
     initialSnapshot.resultCardDescription,
@@ -479,6 +480,11 @@ export async function executeReconciliation(
     paidCards,
     loaded.targets.paidListId,
     asOf,
+    [
+      ...new Set(
+        fieldsConfig.fields.get("Loại chi phí")?.options?.values() ?? [],
+      ),
+    ],
   );
   stageCompleted(
     "paid_card_validation",
@@ -552,6 +558,9 @@ export async function executeReconciliation(
         issues: result.issues,
       });
     }
+    if (result.code === "CATEGORY_TOTAL_MISMATCH") {
+      return apiFailure(503, result.code);
+    }
     return apiFailure(422, result.code);
   }
 
@@ -578,6 +587,7 @@ export async function executeReconciliation(
         totalSpentVnd: result.totalSpentVnd,
         cashSpentVnd: result.cashSpentVnd,
         bankTransferSpentVnd: result.bankTransferSpentVnd,
+        spentByExpenseType: result.spentByExpenseType,
         updatedCardUrl,
       },
     };
@@ -590,6 +600,15 @@ export async function executeReconciliation(
         { code: "RESULT_DESCRIPTION_TOO_LONG" },
       );
       return apiFailure(503, "RESULT_DESCRIPTION_TOO_LONG");
+    }
+    if (error instanceof ResultCardReportError) {
+      stageCompleted(
+        "result_card_write",
+        resultWriteStartedAt,
+        "failed",
+        { code: "INVALID_RESULT_REPORT" },
+      );
+      return apiFailure(503, "INVALID_RESULT_REPORT");
     }
     if (error instanceof TrelloApiError) {
       stageCompleted(

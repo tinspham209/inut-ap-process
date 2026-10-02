@@ -23,6 +23,10 @@ const report = {
   totalSpentVnd: 5_000_000,
   cashSpentVnd: 2_000_000,
   bankTransferSpentVnd: 3_000_000,
+  spentByExpenseType: [
+    { expenseType: "Hạng mục A", spentVnd: 1_000_000 },
+    { expenseType: "Hạng mục B", spentVnd: 4_000_000 },
+  ],
 };
 
 interface TestState {
@@ -114,8 +118,106 @@ describe("result-card output and safe writer", () => {
     expect(
       description,
     ).toContain("Chi chuyển khoản trong tháng: 3,000,000 VND");
+    expect(description).toContain("Chi theo hạng mục trong tháng:");
+    expect(description).toContain("- Hạng mục A: 1,000,000 VND");
+    expect(description).toContain("- Hạng mục B: 4,000,000 VND");
     expect(description).toContain("Cập nhật: 29/09/2026 19:00");
+    const lines = description.split("\n");
+    const monthIndex = lines.indexOf("Tháng báo cáo: 09/2026");
+    expect(lines.indexOf("Cập nhật: 29/09/2026 19:00")).toBe(monthIndex + 1);
+    expect(lines.indexOf("Tổng chi trong tháng: 5,000,000 VND")).toBe(
+      monthIndex + 2,
+    );
+    expect(lines.indexOf("- Hạng mục A: 1,000,000 VND")).toBeGreaterThan(
+      lines.indexOf("Chi chuyển khoản trong tháng: 3,000,000 VND"),
+    );
     expect(description).not.toContain("08/2026");
+  });
+
+  it("replaces the previous variable category block and keeps content outside it", () => {
+    const oldDescription = [
+      "Owner note",
+      "Tháng báo cáo: 08/2026",
+      "Tổng chi trong tháng: 9,000,000 VND",
+      "Chi tiền mặt trong tháng: 4,000,000 VND",
+      "Chi chuyển khoản trong tháng: 5,000,000 VND",
+      "Chi theo hạng mục trong tháng:",
+      "- Hạng mục lama: 9,000,000 VND",
+      "Cập nhật: 31/08/2026 19:00",
+      "Footer",
+    ].join("\n");
+
+    const description = renderResultDescription(oldDescription, report);
+
+    expect(description).toContain("Owner note");
+    expect(description).toContain("Footer");
+    expect(description).not.toContain("Hạng mục lama");
+    expect(description.match(/Chi theo hạng mục trong tháng:/g)).toHaveLength(
+      1,
+    );
+    expect(description.match(/- Hạng mục A:/g)).toHaveLength(1);
+    expect(description.match(/- Hạng mục B:/g)).toHaveLength(1);
+  });
+
+  it("omits zero categories and renders an empty breakdown without zero rows", () => {
+    const withZero = renderResultDescription("", {
+      ...report,
+      spentByExpenseType: [
+        { expenseType: "Hạng mục A", spentVnd: 5_000_000 },
+      ],
+    });
+    expect(withZero).toContain("- Hạng mục A: 5,000,000 VND");
+    expect(withZero).not.toContain("Hạng mục B");
+
+    const empty = renderResultDescription("", {
+      ...report,
+      totalSpentVnd: 0,
+      cashSpentVnd: 0,
+      bankTransferSpentVnd: 0,
+      spentByExpenseType: [],
+    });
+    expect(empty).toContain("Chi theo hạng mục trong tháng:");
+    expect(empty).not.toMatch(/- .*: 0 VND/);
+  });
+
+  it("rejects inconsistent, zero-valued, duplicate, or multiline category rows", () => {
+    expect(() =>
+      renderResultDescription("", {
+        ...report,
+        spentByExpenseType: [
+          { expenseType: "Hạng mục A", spentVnd: 4_000_000 },
+        ],
+      }),
+    ).toThrow("category");
+
+    expect(() =>
+      renderResultDescription("", {
+        ...report,
+        spentByExpenseType: [
+          { expenseType: "Hạng mục A", spentVnd: 0 },
+          { expenseType: "Hạng mục B", spentVnd: 5_000_000 },
+        ],
+      }),
+    ).toThrow("category");
+
+    expect(() =>
+      renderResultDescription("", {
+        ...report,
+        spentByExpenseType: [
+          { expenseType: "Hạng mục A", spentVnd: 1_000_000 },
+          { expenseType: "Hạng mục A", spentVnd: 4_000_000 },
+        ],
+      }),
+    ).toThrow("category");
+
+    expect(() =>
+      renderResultDescription("", {
+        ...report,
+        spentByExpenseType: [
+          { expenseType: "Hạng mục A\nOwner note", spentVnd: 5_000_000 },
+        ],
+      }),
+    ).toThrow("category");
   });
 
   it("formats common VND amounts with comma-separated thousands", () => {
@@ -133,6 +235,9 @@ describe("result-card output and safe writer", () => {
         totalSpentVnd: amount,
         cashSpentVnd: amount,
         bankTransferSpentVnd: 0,
+        spentByExpenseType: [
+          { expenseType: "Hạng mục A", spentVnd: amount },
+        ],
       });
 
       expect(description).toContain(

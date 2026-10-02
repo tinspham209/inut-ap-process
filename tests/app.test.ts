@@ -18,6 +18,10 @@ const successBody: ReconciliationSuccessBody = {
   totalSpentVnd: 5_000_000,
   cashSpentVnd: 2_000_000,
   bankTransferSpentVnd: 3_000_000,
+  spentByExpenseType: [
+    { expenseType: "Synthetic category A", spentVnd: 2_000_000 },
+    { expenseType: "Synthetic category B", spentVnd: 3_000_000 },
+  ],
   updatedCardUrl: "https://trello.com/c/AbCd1234",
 };
 
@@ -289,6 +293,126 @@ describe("reconciliation HTTP API", () => {
 
     expect(afterRestart.status).toBe(200);
     expect(execute).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
+    {
+      name: "a category sum that does not equal the total",
+      mutate(body: ReconciliationSuccessBody) {
+        return { ...body, spentByExpenseType: [{ expenseType: "A", spentVnd: 1 }] };
+      },
+    },
+    {
+      name: "a duplicate category name",
+      mutate(body: ReconciliationSuccessBody) {
+        return {
+          ...body,
+          spentByExpenseType: [
+            { expenseType: "A", spentVnd: 2_000_000 },
+            { expenseType: "A", spentVnd: 3_000_000 },
+          ],
+        };
+      },
+    },
+    {
+      name: "a zero-valued category entry",
+      mutate(body: ReconciliationSuccessBody) {
+        return {
+          ...body,
+          spentByExpenseType: [
+            { expenseType: "A", spentVnd: 5_000_000 },
+            { expenseType: "B", spentVnd: 0 },
+          ],
+        };
+      },
+    },
+    {
+      name: "a category entry with a blank name",
+      mutate(body: ReconciliationSuccessBody) {
+        return {
+          ...body,
+          spentByExpenseType: [{ expenseType: "  ", spentVnd: 5_000_000 }],
+        };
+      },
+    },
+    {
+      name: "a category entry with a non-integer amount",
+      mutate(body: ReconciliationSuccessBody) {
+        return {
+          ...body,
+          spentByExpenseType: [
+            { expenseType: "Synthetic category A", spentVnd: 2_000_000.5 },
+            { expenseType: "Synthetic category B", spentVnd: 2_999_999.5 },
+          ],
+        };
+      },
+    },
+  ])("rejects $name before reporting success", async ({ mutate }) => {
+    const execute = vi.fn(async () => ({
+      ok: true as const,
+      body: mutate(successBody),
+    }));
+    const app = createTestApp(execute);
+
+    const response = await app.request("/v1/reconcile", {
+      method: "POST",
+      headers: authorization(config.reconcileButtonSecret),
+    });
+
+    expect(response.status).toBe(502);
+    expect(await response.json()).toMatchObject({
+      code: "INVALID_RECONCILIATION_RESULT",
+    });
+  });
+
+  it("accepts an empty category array when all monthly totals are zero", async () => {
+    const emptyReport: ReconciliationSuccessBody = {
+      ...successBody,
+      totalSpentVnd: 0,
+      cashSpentVnd: 0,
+      bankTransferSpentVnd: 0,
+      spentByExpenseType: [],
+    };
+    const app = createTestApp(async () => ({
+      ok: true,
+      body: emptyReport,
+    }));
+
+    const response = await app.request("/v1/reconcile", {
+      method: "POST",
+      headers: authorization(config.reconcileButtonSecret),
+    });
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      totalSpentVnd: 0,
+      spentByExpenseType: [],
+    });
+  });
+
+  it("rejects a success response missing the required category breakdown", async () => {
+    const missingBreakdown = new Proxy(successBody, {
+      get(target, property, receiver) {
+        if (property === "spentByExpenseType") {
+          return undefined;
+        }
+        return Reflect.get(target, property, receiver);
+      },
+    });
+    const app = createTestApp(async () => ({
+      ok: true,
+      body: missingBreakdown,
+    }));
+
+    const response = await app.request("/v1/reconcile", {
+      method: "POST",
+      headers: authorization(config.reconcileButtonSecret),
+    });
+
+    expect(response.status).toBe(502);
+    expect(await response.json()).toMatchObject({
+      code: "INVALID_RECONCILIATION_RESULT",
+    });
   });
 
   it("authenticates the read-only configuration check and does not reconcile", async () => {

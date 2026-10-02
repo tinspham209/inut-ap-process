@@ -17,6 +17,7 @@ import {
   syntheticPluginId,
   validCardData,
   validConfig,
+  validFields,
 } from "./fixtures/amazing-fields.js";
 
 const testTime = new Date("2026-09-29T12:00:00.000Z");
@@ -77,14 +78,33 @@ function pluginDataForCard(cardData: Record<string, unknown>): TrelloPluginData[
 function defaultCardData(
   amountVnd = 2_000_000,
   method: "Tiền mặt" | "Chuyển khoản" = "Tiền mặt",
+  expenseType: "Synthetic expense" | "Synthetic travel" = "Synthetic expense",
 ): Record<string, unknown> {
   return {
     ...validCardData,
     __boardId: canonicalBoardId,
     [fieldIds.amount]: amountVnd,
+    [fieldIds.expenseType]: [
+      expenseType === "Synthetic expense"
+        ? fieldIds.expenseOption
+        : fieldIds.travelOption,
+    ],
     [fieldIds.paymentMethod]: [
       method === "Tiền mặt" ? fieldIds.cashOption : fieldIds.transferOption,
     ],
+  };
+}
+
+function configWithExpenseOptions(
+  expenseOptions: Array<{ id: string; text: string }>,
+) {
+  return {
+    ...validConfig,
+    fields: validFields.map((field) =>
+      field.id === fieldIds.expenseType
+        ? { ...field, options: expenseOptions }
+        : field,
+    ),
   };
 }
 
@@ -97,6 +117,7 @@ function createScenario(options: ScenarioOptions = {}) {
   const fixture = makeAmazingFieldsFixture({
     config: configuredFields,
   });
+  let boardPluginData = fixture.boardPluginData;
   const specs = options.cards ?? [
     { id: "synthetic-paid-card-1", cardData: defaultCardData() },
   ];
@@ -182,10 +203,15 @@ function createScenario(options: ScenarioOptions = {}) {
       return Response.json(resultCardRecord());
     }
     if (url.pathname === `/1/boards/${canonicalBoardId}/pluginData`) {
-      return Response.json(fixture.boardPluginData);
+      return Response.json(boardPluginData);
     }
     if (url.pathname === `/1/boards/${canonicalBoardId}/cards/all`) {
-      return Response.json([...cards, resultCardRecord()]);
+      const boardCards = [...cards, resultCardRecord()];
+      return Response.json(
+        url.searchParams.has("before")
+          ? boardCards.slice(1000)
+          : boardCards.slice(0, 1000),
+      );
     }
     const pluginDataPrefix = "/1/cards/";
     if (
@@ -278,13 +304,28 @@ function createScenario(options: ScenarioOptions = {}) {
     logger: createServerLogger(() => {}),
   });
 
-  return { app, state, execute };
+  return {
+    app,
+    state,
+    execute,
+    replaceCardData(cardId: string, cardData: Record<string, unknown>) {
+      cardPluginData.set(cardId, pluginDataForCard(cardData));
+    },
+    replaceConfig(config: Record<string, unknown>) {
+      boardPluginData = makeAmazingFieldsFixture({
+        config: { ...config, boardId: canonicalBoardId },
+      }).boardPluginData;
+    },
+  };
 }
 
-async function postReconcile(app: ReturnType<typeof createApp>) {
+async function postReconcile(
+  app: ReturnType<typeof createApp>,
+  caller: "button" | "cron" = "button",
+) {
   return app.request("/v1/reconcile", {
     method: "POST",
-    headers: { Authorization: "Bearer synthetic-button-secret" },
+    headers: { Authorization: `Bearer synthetic-${caller}-secret` },
   });
 }
 
@@ -298,11 +339,19 @@ describe("full reconciliation integration with fake HTTP", () => {
       cards: [
         {
           id: "synthetic-cash-card",
-          cardData: defaultCardData(2_000_000, "Tiền mặt"),
+          cardData: defaultCardData(
+            2_000_000,
+            "Tiền mặt",
+            "Synthetic travel",
+          ),
         },
         {
           id: "synthetic-bank-card",
-          cardData: defaultCardData(3_000_000, "Chuyển khoản"),
+          cardData: defaultCardData(
+            3_000_000,
+            "Chuyển khoản",
+            "Synthetic expense",
+          ),
         },
         {
           id: "synthetic-discard-card",
@@ -323,10 +372,26 @@ describe("full reconciliation integration with fake HTTP", () => {
       totalSpentVnd: 5_000_000,
       cashSpentVnd: 2_000_000,
       bankTransferSpentVnd: 3_000_000,
+      spentByExpenseType: [
+        { expenseType: "Synthetic expense", spentVnd: 3_000_000 },
+        { expenseType: "Synthetic travel", spentVnd: 2_000_000 },
+      ],
       updatedCardUrl: `https://trello.com/c/${resultCardIdInput}`,
     });
+    expect(
+      body.spentByExpenseType.reduce(
+        (sum: number, item: { spentVnd: number }) => sum + item.spentVnd,
+        0,
+      ),
+    ).toBe(body.totalSpentVnd);
     expect(scenario.state.resultDescription).toContain(
       "Tổng chi trong tháng: 5,000,000 VND",
+    );
+    expect(scenario.state.resultDescription).toContain(
+      "Chi theo hạng mục trong tháng:\n- Synthetic expense: 3,000,000 VND\n- Synthetic travel: 2,000,000 VND",
+    );
+    expect(scenario.state.resultDescription).not.toContain(
+      "Synthetic unused",
     );
     expect(scenario.state.putTargets).toEqual([
       `/1/cards/${canonicalResultCardId}`,
@@ -348,6 +413,169 @@ describe("full reconciliation integration with fake HTTP", () => {
     expect(stageLogs).toContain('"requestId":');
     expect(stageLogs).not.toContain("synthetic-telegram-token");
     expect(stageLogs).not.toContain("synthetic-fd-payload");
+  });
+
+  it("includes Paid cards found on a later board-card page", async () => {
+    const draftCards = Array.from({ length: 1000 }, (_, index) => ({
+      id: `synthetic-draft-${index}`,
+      idList: "synthetic-draft-list",
+    }));
+    const scenario = createScenario({
+      cards: [
+        ...draftCards,
+        {
+          id: "synthetic-paid-on-second-page",
+          cardData: defaultCardData(2_000_000),
+        },
+      ],
+    });
+
+    const response = await postReconcile(scenario.app);
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body).toMatchObject({
+      totalSpentVnd: 2_000_000,
+      spentByExpenseType: [
+        { expenseType: "Synthetic expense", spentVnd: 2_000_000 },
+      ],
+    });
+    expect(
+      scenario.state.calls.filter(
+        (call) => call.path === `/1/boards/${canonicalBoardId}/cards/all`,
+      ),
+    ).toHaveLength(4);
+    expect(scenario.state.putTargets).toHaveLength(1);
+  });
+
+  it("updates category breakdown on the next run after a Paid category edit", async () => {
+    const scenario = createScenario({
+      cards: [
+        {
+          id: "synthetic-category-edited-card",
+          cardData: defaultCardData(2_000_000, "Tiền mặt", "Synthetic expense"),
+        },
+      ],
+    });
+
+    const firstResponse = await postReconcile(scenario.app);
+    expect(firstResponse.status).toBe(200);
+    expect(scenario.state.resultDescription).toContain(
+      "- Synthetic expense: 2,000,000 VND",
+    );
+
+    scenario.replaceCardData(
+      "synthetic-category-edited-card",
+      defaultCardData(2_000_000, "Tiền mặt", "Synthetic travel"),
+    );
+    const secondResponse = await postReconcile(scenario.app, "cron");
+    const secondBody = await secondResponse.json();
+
+    expect(secondResponse.status).toBe(200);
+    expect(secondBody).toMatchObject({
+      totalSpentVnd: 2_000_000,
+      spentByExpenseType: [
+        { expenseType: "Synthetic travel", spentVnd: 2_000_000 },
+      ],
+    });
+    expect(scenario.state.resultDescription).not.toContain(
+      "- Synthetic expense:",
+    );
+    expect(scenario.state.resultDescription).toContain(
+      "- Synthetic travel: 2,000,000 VND",
+    );
+    expect(scenario.state.putTargets).toHaveLength(2);
+  });
+
+  it("refreshes renamed option labels and rejects a removed option still used by Paid", async () => {
+    const initialOptions = [
+      { id: fieldIds.expenseOption, text: "Synthetic expense" },
+      { id: fieldIds.travelOption, text: "Synthetic travel" },
+      { id: fieldIds.unusedExpenseOption, text: "Synthetic unused" },
+    ];
+    const scenario = createScenario({
+      config: configWithExpenseOptions(initialOptions),
+      cards: [
+        {
+          id: "synthetic-category-config-card",
+          cardData: defaultCardData(2_000_000),
+        },
+      ],
+    });
+
+    const initialResponse = await postReconcile(scenario.app);
+    expect(initialResponse.status).toBe(200);
+    expect(scenario.state.resultDescription).toContain(
+      "- Synthetic expense: 2,000,000 VND",
+    );
+
+    scenario.replaceConfig(
+      configWithExpenseOptions([
+        { id: fieldIds.expenseOption, text: "Renamed expense" },
+        ...initialOptions.slice(1),
+      ]),
+    );
+    const renamedResponse = await postReconcile(scenario.app, "cron");
+    const renamedBody = await renamedResponse.json();
+    expect(renamedResponse.status).toBe(200);
+    expect(renamedBody).toMatchObject({
+      spentByExpenseType: [
+        { expenseType: "Renamed expense", spentVnd: 2_000_000 },
+      ],
+    });
+    expect(scenario.state.resultDescription).not.toContain(
+      "- Synthetic expense:",
+    );
+    expect(scenario.state.resultDescription).toContain(
+      "- Renamed expense: 2,000,000 VND",
+    );
+
+    const previousDescription = scenario.state.resultDescription;
+    scenario.replaceConfig(
+      configWithExpenseOptions(initialOptions.slice(1)),
+    );
+    const removedResponse = await postReconcile(scenario.app, "cron");
+    const removedBody = await removedResponse.json();
+
+    expect(removedResponse.status).toBe(422);
+    expect(removedBody).toMatchObject({
+      code: "INVALID_PAID_CARD_DATA",
+      issues: [
+        {
+          cardId: "synthetic-category-config-card",
+          field: "Loại chi phí",
+          reason: "invalid_value",
+        },
+      ],
+    });
+    expect(scenario.state.putTargets).toHaveLength(2);
+    expect(scenario.state.resultDescription).toBe(previousDescription);
+    expect(scenario.state.telegramCalls).toHaveLength(1);
+  });
+
+  it("rejects total and category overflow without writing a result", async () => {
+    const scenario = createScenario({
+      cards: [
+        {
+          id: "synthetic-overflow-card-1",
+          cardData: defaultCardData(Number.MAX_SAFE_INTEGER),
+        },
+        {
+          id: "synthetic-overflow-card-2",
+          cardData: defaultCardData(Number.MAX_SAFE_INTEGER),
+        },
+      ],
+    });
+
+    const response = await postReconcile(scenario.app);
+    const body = await response.json();
+
+    expect(response.status).toBe(422);
+    expect(body).toMatchObject({
+      code: "TOTAL_OVERFLOW",
+    });
+    expect(scenario.state.putTargets).toHaveLength(0);
+    expect(scenario.state.telegramCalls).toHaveLength(0);
   });
 
   it("returns every detected Paid-card issue and sends one sanitized summary", async () => {
@@ -662,7 +890,24 @@ describe("full reconciliation integration with fake HTTP", () => {
         totalSpentVnd: count * 2_000_000,
         cashSpentVnd: count * 2_000_000,
         bankTransferSpentVnd: 0,
+        spentByExpenseType:
+          count === 0
+            ? []
+            : [
+                {
+                  expenseType: "Synthetic expense",
+                  spentVnd: count * 2_000_000,
+                },
+              ],
       });
+      if (count === 0) {
+        expect(scenario.state.resultDescription).toContain(
+          "Chi theo hạng mục trong tháng:",
+        );
+        expect(scenario.state.resultDescription).not.toContain(
+          "- Synthetic expense:",
+        );
+      }
       expect(scenario.state.putTargets).toHaveLength(1);
       for (const start of new Set(acquiredAt)) {
         const windowCount = acquiredAt.filter(

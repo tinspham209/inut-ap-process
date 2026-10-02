@@ -55,6 +55,7 @@ export function validatePaidCards(
   cards: readonly PaidCardInput[],
   paidListId: string,
   asOf: Date,
+  allowedExpenseTypes: ReadonlySet<string>,
 ): PaidCardValidation {
   if (!Number.isFinite(asOf.getTime())) {
     throw new Error("Reconciliation asOf must be a valid date");
@@ -121,6 +122,13 @@ export function validatePaidCards(
           cardUrl: card.url,
           field: "Loại chi phí",
           reason: "missing",
+        });
+      } else if (!allowedExpenseTypes.has(fields.expenseType.trim())) {
+        cardIssues.push({
+          cardId: card.id,
+          cardUrl: card.url,
+          field: "Loại chi phí",
+          reason: "invalid_value",
         });
       }
 
