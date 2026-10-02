@@ -65,9 +65,28 @@ describe("reconciliation HTTP API", () => {
     expect(execute).not.toHaveBeenCalled();
   });
 
-  it("rejects malformed requests and invalid authorization without I/O", async () => {
+  it("accepts Trello's empty JSON object payload", async () => {
     const execute = vi.fn(async () => successExecution);
     const app = createTestApp(execute);
+
+    const response = await app.request("/v1/reconcile", {
+      method: "POST",
+      headers: {
+        ...authorization(config.reconcileButtonSecret),
+        "Content-Type": "application/json",
+      },
+      body: "{}",
+    });
+
+    expect(response.status).toBe(200);
+    expect(execute).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects payload fields and invalid authorization without I/O", async () => {
+    const execute = vi.fn(async () => successExecution);
+    const { logger, lines } = captureLogs();
+    const app = createTestApp(execute, undefined, { logger });
+    const bodySentinel = "synthetic-request-payload";
 
     const invalidBody = await app.request("/v1/reconcile", {
       method: "POST",
@@ -75,21 +94,40 @@ describe("reconciliation HTTP API", () => {
         ...authorization(config.reconcileButtonSecret),
         "Content-Type": "application/json",
       },
-      body: "{",
+      body: JSON.stringify({ marker: bodySentinel }),
     });
     expect(invalidBody.status).toBe(400);
+    expect(invalidBody.headers.get("X-Request-Id")).toBeTruthy();
+    expect(await invalidBody.json()).toMatchObject({
+      code: "INVALID_REQUEST",
+      reason: "BODY_MUST_BE_EMPTY_OR_EMPTY_OBJECT",
+      message:
+        "POST /v1/reconcile accepts an empty body or {} only. Remove all payload fields.",
+    });
 
     const invalidAuth = await app.request("/v1/reconcile", {
       method: "POST",
       headers: authorization("wrong-secret"),
     });
     expect(invalidAuth.status).toBe(401);
+    expect(await invalidAuth.json()).toMatchObject({
+      code: "UNAUTHORIZED",
+      reason: "AUTHORIZATION_INVALID",
+    });
 
     const missingAuth = await app.request("/v1/reconcile", {
       method: "POST",
     });
     expect(missingAuth.status).toBe(401);
+    expect(await missingAuth.json()).toMatchObject({
+      code: "UNAUTHORIZED",
+      reason: "AUTHORIZATION_MISSING",
+    });
     expect(execute).not.toHaveBeenCalled();
+    const logOutput = lines.map(({ line }) => line).join("\n");
+    expect(logOutput).toContain('"code":"INVALID_REQUEST"');
+    expect(logOutput).toContain('"bodyLength":');
+    expect(logOutput).not.toContain(bodySentinel);
   });
 
   it("does not let query parameters classify a button request as cron", async () => {

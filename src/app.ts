@@ -54,6 +54,24 @@ function secureSecretMatch(header: string | undefined, expected: string): boolea
   );
 }
 
+function isEmptyReconciliationBody(body: string): boolean {
+  if (body.trim().length === 0) {
+    return true;
+  }
+
+  try {
+    const parsed: unknown = JSON.parse(body);
+    return (
+      typeof parsed === "object" &&
+      parsed !== null &&
+      !Array.isArray(parsed) &&
+      Object.keys(parsed).length === 0
+    );
+  } catch {
+    return false;
+  }
+}
+
 function isTrelloCardUrl(value: string): boolean {
   try {
     const url = new URL(value);
@@ -303,16 +321,46 @@ export function createApp(options?: ReconciliationAppOptions): Hono<AppEnvironme
           ? "button"
           : undefined;
       if (!caller) {
+        const requestId = context.get("requestId");
+        const reason = authorization
+          ? "AUTHORIZATION_INVALID"
+          : "AUTHORIZATION_MISSING";
+        logger.warn("reconciliation.request_rejected", {
+          requestId,
+          code: "UNAUTHORIZED",
+          reason,
+        });
         return context.json(
-          { status: "error", code: "UNAUTHORIZED" },
+          {
+            status: "error",
+            code: "UNAUTHORIZED",
+            reason,
+            message: "Authorization must use a configured Bearer secret.",
+            requestId,
+          },
           401,
         );
       }
 
       const body = await context.req.text();
-      if (body.trim().length > 0) {
+      if (!isEmptyReconciliationBody(body)) {
+        const requestId = context.get("requestId");
+        const bodyLength = Buffer.byteLength(body, "utf8");
+        logger.warn("reconciliation.request_rejected", {
+          requestId,
+          code: "INVALID_REQUEST",
+          reason: "BODY_MUST_BE_EMPTY_OR_EMPTY_OBJECT",
+          bodyLength,
+        });
         return context.json(
-          { status: "error", code: "INVALID_REQUEST" },
+          {
+            status: "error",
+            code: "INVALID_REQUEST",
+            reason: "BODY_MUST_BE_EMPTY_OR_EMPTY_OBJECT",
+            message:
+              "POST /v1/reconcile accepts an empty body or {} only. Remove all payload fields.",
+            requestId,
+          },
           400,
         );
       }

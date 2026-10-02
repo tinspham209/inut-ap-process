@@ -117,7 +117,8 @@ call `GET /v1/config-check` again before `POST /v1/reconcile`.
 
 Run behind HTTPS. `GET /health` returns `{"status":"ok"}` and performs no
 Trello or Telegram I/O. `POST /v1/reconcile` accepts an empty body and a
-`Bearer` secret in `Authorization`:
+`Bearer` secret in `Authorization`. The reconciliation POST body must be empty
+or the empty JSON object `{}` (Trello Automation's default); do not send fields:
 
 | Caller | Header value |
 | --- | --- |
@@ -138,6 +139,9 @@ the result-card description is written and verified; it includes `month`,
 | `422` | Invalid Paid-card data or archived Paid card |
 | `429` | Button success cooldown; includes `Retry-After` |
 | `502` / `503` | Trello, Amazing Fields, Telegram, or service failure |
+
+Request/authentication errors such as `400` and `401` do not send Telegram.
+Telegram is reserved for invalid Paid-card data (`422`).
 
 Only one run executes at a time in a process. A successful button run starts a
 60-second cooldown at completion; failed runs do not. Cron bypasses the button

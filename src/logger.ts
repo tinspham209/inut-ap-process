@@ -24,6 +24,8 @@ const safeFields = new Set([
   "failedCheckCount",
   "stage",
   "paidCardCount",
+  "bodyLength",
+  "reason",
 ]);
 
 const safeEvents = new Set([
@@ -31,6 +33,7 @@ const safeEvents = new Set([
   "http.request.completed",
   "http.request.unhandled_error",
   "reconciliation.started",
+  "reconciliation.request_rejected",
   "reconciliation.completed",
   "reconciliation.stage.started",
   "reconciliation.stage.completed",
@@ -92,6 +95,12 @@ const safeStages = new Set([
   "result_card_write",
 ]);
 
+const safeReasons = new Set([
+  "AUTHORIZATION_INVALID",
+  "AUTHORIZATION_MISSING",
+  "BODY_MUST_BE_EMPTY_OR_EMPTY_OBJECT",
+]);
+
 function safeFieldValue(value: string | number | boolean): string | number | boolean {
   if (typeof value === "string") {
     return value.slice(0, 160);
@@ -141,6 +150,9 @@ function isSafeField(key: string, value: string | number | boolean): boolean {
   }
   if (key === "stage") {
     return typeof value === "string" && safeStages.has(value);
+  }
+  if (key === "reason") {
+    return typeof value === "string" && safeReasons.has(value);
   }
   if (key === "status") {
     return (
