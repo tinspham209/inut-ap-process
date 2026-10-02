@@ -19,13 +19,19 @@ const safeFields = new Set([
   "errorName",
   "issueCount",
   "notificationStatus",
+  "notificationAttempts",
   "port",
   "checkCount",
   "failedCheckCount",
   "stage",
   "paidCardCount",
+  "archivedPaidCount",
   "bodyLength",
   "reason",
+  "retryAfterSeconds",
+  "checkName",
+  "issueSummary",
+  "notificationReason",
 ]);
 
 const safeEvents = new Set([
@@ -47,6 +53,7 @@ const safeEvents = new Set([
 const safeCodes = new Set([
   "ARCHIVED_PAID_CARD",
   "AMAZING_FIELDS_CONFIGURATION_INVALID",
+  "BUTTON_COOLDOWN",
   "CONFIGURATION_CHECK_FAILED",
   "CONFIGURATION_CHECK_UNAVAILABLE",
   "CONFIGURATION_NOT_READY",
@@ -61,20 +68,19 @@ const safeCodes = new Set([
   "PAID_DATA_NOTIFICATION_FAILED",
   "PAID_DATA_NOTIFICATION_SENT",
   "RECONCILIATION_CONFLICT",
-  "RECONCILIATION_IN_PROGRESS",
   "RECONCILIATION_FAILED",
+  "RECONCILIATION_IN_PROGRESS",
   "RECONCILIATION_SUCCEEDED",
   "RESULT_DESCRIPTION_TOO_LONG",
   "SERVER_LISTEN_FAILED",
   "TELEGRAM_CONFIGURATION_MISSING",
   "TELEGRAM_NOTIFICATION_FAILED",
-  "UNAUTHORIZED",
-  "BUTTON_COOLDOWN",
   "TRELLO_ACCESS_OR_TARGET_INVALID",
   "TRELLO_CHECK_FAILED",
   "TRELLO_PLUGIN_DATA_UNAVAILABLE",
   "TRELLO_UPSTREAM_FAILURE",
   "TOTAL_OVERFLOW",
+  "UNAUTHORIZED",
 ]);
 
 const safeErrorNames = new Set([
@@ -99,11 +105,36 @@ const safeReasons = new Set([
   "AUTHORIZATION_INVALID",
   "AUTHORIZATION_MISSING",
   "BODY_MUST_BE_EMPTY_OR_EMPTY_OBJECT",
+  "BUTTON_COOLDOWN_ACTIVE",
+  "RECONCILIATION_ALREADY_RUNNING",
+  "RECONCILIATION_SOURCE_OR_TARGET_CHANGED",
 ]);
 
-function safeFieldValue(value: string | number | boolean): string | number | boolean {
+const safeIssueFields = new Set([
+  "Tiêu đề",
+  "Số tiền",
+  "Loại chi phí",
+  "Hình thức thanh toán",
+  "Ngày thanh toán",
+  "Amazing Fields",
+]);
+const safeIssueReasons = new Set([
+  "missing",
+  "invalid_format",
+  "invalid_value",
+]);
+const safeNotificationReasons = new Set([
+  "invalid_response",
+  "retry_exhausted",
+  "upstream_failure",
+]);
+
+function safeFieldValue(
+  key: string,
+  value: string | number | boolean,
+): string | number | boolean {
   if (typeof value === "string") {
-    return value.slice(0, 160);
+    return value.slice(0, key === "issueSummary" ? 500 : 160);
   }
   if (typeof value === "number") {
     return Number.isFinite(value) ? value : 0;
@@ -154,6 +185,45 @@ function isSafeField(key: string, value: string | number | boolean): boolean {
   if (key === "reason") {
     return typeof value === "string" && safeReasons.has(value);
   }
+  if (key === "checkName") {
+    return (
+      typeof value === "string" &&
+      [
+        "environment",
+        "trello_access_and_targets",
+        "amazing_fields_board_config",
+        "telegram_configuration",
+      ].includes(value)
+    );
+  }
+  if (key === "issueSummary") {
+    if (typeof value !== "string" || value.length > 500) {
+      return false;
+    }
+    if (value.length === 0) {
+      return true;
+    }
+    return value.split(";").every((entry) => {
+      const match =
+        /^(.+):(missing|invalid_format|invalid_value)=([1-9]\d*)$/.exec(
+          entry,
+        );
+      return (
+        match !== null &&
+        safeIssueFields.has(match[1] ?? "") &&
+        safeIssueReasons.has(match[2] ?? "") &&
+        Number.isSafeInteger(Number(match[3]))
+      );
+    });
+  }
+  if (key === "notificationReason") {
+    return (
+      typeof value === "string" && safeNotificationReasons.has(value)
+    );
+  }
+  if (key === "retryAfterSeconds") {
+    return typeof value === "number" && Number.isInteger(value) && value > 0;
+  }
   if (key === "status") {
     return (
       (typeof value === "number" && Number.isInteger(value) && value >= 100 && value <= 599) ||
@@ -180,7 +250,7 @@ function emit(
         typeof value === "boolean") &&
       isSafeField(key, value)
     ) {
-      safe[key] = safeFieldValue(value);
+      safe[key] = safeFieldValue(key, value);
     }
   }
 

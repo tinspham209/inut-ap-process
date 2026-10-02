@@ -131,11 +131,12 @@ describe("reconciliation HTTP API", () => {
   });
 
   it("does not let query parameters classify a button request as cron", async () => {
+    const { logger, lines } = captureLogs();
     const execute = vi
       .fn<() => Promise<ReconciliationExecution>>()
       .mockResolvedValueOnce(successExecution)
       .mockResolvedValueOnce(successExecution);
-    const app = createTestApp(execute);
+    const app = createTestApp(execute, undefined, { logger });
 
     await app.request("/v1/reconcile", {
       method: "POST",
@@ -152,6 +153,10 @@ describe("reconciliation HTTP API", () => {
     expect(response.status).toBe(429);
     expect(response.headers.get("Retry-After")).toBeTruthy();
     expect(execute).toHaveBeenCalledTimes(1);
+    const output = lines.map(({ line }) => line).join("\n");
+    expect(output).toContain('"code":"BUTTON_COOLDOWN"');
+    expect(output).toContain('"reason":"BUTTON_COOLDOWN_ACTIVE"');
+    expect(output).not.toContain("source=cron");
   });
 
   it("starts the button cooldown when a successful request completes", async () => {
@@ -229,6 +234,7 @@ describe("reconciliation HTTP API", () => {
   });
 
   it("does not create cooldown after a failed run and does not accept an invalid 200 body", async () => {
+    const { logger, lines } = captureLogs();
     let calls = 0;
     const execute = vi.fn(async () => {
       calls += 1;
@@ -246,7 +252,7 @@ describe("reconciliation HTTP API", () => {
             },
           };
     });
-    const app = createTestApp(execute);
+    const app = createTestApp(execute, undefined, { logger });
 
     const failed = await app.request("/v1/reconcile", {
       method: "POST",
@@ -260,6 +266,11 @@ describe("reconciliation HTTP API", () => {
     });
     expect(invalidSuccess.status).toBe(502);
     expect(execute).toHaveBeenCalledTimes(2);
+    const output = lines.map(({ line }) => line).join("\n");
+    expect(output).toContain('"code":"INVALID_RECONCILIATION_RESULT"');
+    expect(output).not.toContain(
+      '"code":"RECONCILIATION_SUCCEEDED","issueCount":0',
+    );
   });
 
   it("does not share the in-memory cooldown across app restarts", async () => {

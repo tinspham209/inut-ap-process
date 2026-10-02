@@ -398,6 +398,13 @@ describe("full reconciliation integration with fake HTTP", () => {
     );
     expect(scenario.state.telegramCalls[0]).not.toContain("2000000");
     expect(scenario.state.putTargets).toHaveLength(0);
+    const logs = scenario.state.logs.join("\n");
+    expect(logs).toContain('"issueSummary":');
+    expect(logs).toContain("Số tiền:missing=1");
+    expect(logs).toContain("Hình thức thanh toán:invalid_value=1");
+    expect(logs).not.toContain("synthetic-current-invalid");
+    expect(logs).not.toContain("https://trello.com");
+    expect(logs).not.toContain("2000000");
   });
 
   it("collects independent invalid fields from one Paid card", async () => {
@@ -433,6 +440,9 @@ describe("full reconciliation integration with fake HTTP", () => {
     );
     expect(scenario.state.telegramCalls).toHaveLength(1);
     expect(scenario.state.putTargets).toHaveLength(0);
+    expect(scenario.state.logs.join("\n")).toContain(
+      '"issueSummary":"',
+    );
   });
 
   it("keeps the complete response issue list when Telegram truncates", async () => {
@@ -498,6 +508,10 @@ describe("full reconciliation integration with fake HTTP", () => {
       notification: { status: "failed" },
     });
     expect(scenario.state.putTargets).toHaveLength(0);
+    const logs = scenario.state.logs.join("\n");
+    expect(logs).toContain('"notificationReason":"retry_exhausted"');
+    expect(logs).toContain('"upstreamStatus":503');
+    expect(logs).not.toContain("synthetic-invalid-card");
   });
 
   it("rejects archived Paid cards without writing or notifying Telegram", async () => {
@@ -526,6 +540,7 @@ describe("full reconciliation integration with fake HTTP", () => {
     });
     expect(scenario.state.putTargets).toHaveLength(0);
     expect(scenario.state.telegramCalls).toHaveLength(0);
+    expect(scenario.state.logs.join("\n")).toContain('"archivedPaidCount":1');
   });
 
   it("maps incompatible global CFG to 502, not an empty successful report", async () => {

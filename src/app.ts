@@ -271,6 +271,7 @@ export function createApp(options?: ReconciliationAppOptions): Hono<AppEnvironme
           status: result.ready ? 200 : 503,
           checkCount: result.checks.length,
           failedCheckCount,
+          ...(failedCheck?.name ? { checkName: failedCheck.name } : {}),
           code:
             failedCheck?.code ??
             (result.ready
@@ -365,8 +366,19 @@ export function createApp(options?: ReconciliationAppOptions): Hono<AppEnvironme
         );
       }
       if (running) {
+        const requestId = context.get("requestId");
+        logger.warn("reconciliation.request_rejected", {
+          requestId,
+          code: "RECONCILIATION_IN_PROGRESS",
+          reason: "RECONCILIATION_ALREADY_RUNNING",
+        });
         return context.json(
-          { status: "error", code: "RECONCILIATION_IN_PROGRESS" },
+          {
+            status: "error",
+            code: "RECONCILIATION_IN_PROGRESS",
+            reason: "RECONCILIATION_ALREADY_RUNNING",
+            requestId,
+          },
           409,
         );
       }
@@ -376,10 +388,24 @@ export function createApp(options?: ReconciliationAppOptions): Hono<AppEnvironme
         const remainingMs =
           60_000 - (requestStartedAt - lastSuccessfulButtonRunAt);
         if (remainingMs > 0) {
+          const retryAfterSeconds = Math.ceil(remainingMs / 1000);
+          const requestId = context.get("requestId");
+          logger.warn("reconciliation.request_rejected", {
+            requestId,
+            code: "BUTTON_COOLDOWN",
+            reason: "BUTTON_COOLDOWN_ACTIVE",
+            retryAfterSeconds,
+          });
           return context.json(
-            { status: "error", code: "BUTTON_COOLDOWN" },
+            {
+              status: "error",
+              code: "BUTTON_COOLDOWN",
+              reason: "BUTTON_COOLDOWN_ACTIVE",
+              retryAfterSeconds,
+              requestId,
+            },
             429,
-            { "Retry-After": String(Math.ceil(remainingMs / 1000)) },
+            { "Retry-After": String(retryAfterSeconds) },
           );
         }
       }
@@ -409,38 +435,56 @@ export function createApp(options?: ReconciliationAppOptions): Hono<AppEnvironme
           typeof failureBody?.code === "string" &&
           /^[A-Z0-9_]{1,80}$/.test(failureBody.code)
             ? failureBody.code
-            : execution.ok
-              ? "RECONCILIATION_SUCCEEDED"
-              : "RECONCILIATION_FAILED";
-        const outcomeFields = {
+            : "RECONCILIATION_FAILED";
+        if (!execution.ok) {
+          logger.warn("reconciliation.completed", {
+            requestId,
+            caller,
+            status: execution.status,
+            durationMs: Math.max(
+              0,
+              Math.round(performance.now() - runStartedAt),
+            ),
+            code: responseCode,
+            ...(execution.logContext?.upstreamStatus
+              ? { upstreamStatus: execution.logContext.upstreamStatus }
+              : {}),
+            issueCount,
+            ...(notificationStatus ? { notificationStatus } : {}),
+          });
+          return context.json(execution.body, execution.status);
+        }
+        if (!isValidSuccessBody(execution.body)) {
+          logger.error("reconciliation.completed", {
+            requestId,
+            caller,
+            status: 502,
+            durationMs: Math.max(
+              0,
+              Math.round(performance.now() - runStartedAt),
+            ),
+            code: "INVALID_RECONCILIATION_RESULT",
+          });
+          return context.json(
+            {
+              status: "error",
+              code: "INVALID_RECONCILIATION_RESULT",
+              requestId,
+            },
+            502,
+          );
+        }
+        logger.info("reconciliation.completed", {
           requestId,
           caller,
-          status: execution.ok ? 200 : execution.status,
+          status: 200,
           durationMs: Math.max(
             0,
             Math.round(performance.now() - runStartedAt),
           ),
-          code: responseCode,
-          ...(!execution.ok && execution.logContext?.upstreamStatus
-            ? { upstreamStatus: execution.logContext.upstreamStatus }
-            : {}),
-          issueCount,
-          ...(notificationStatus ? { notificationStatus } : {}),
-        };
-        if (execution.ok) {
-          logger.info("reconciliation.completed", outcomeFields);
-        } else {
-          logger.warn("reconciliation.completed", outcomeFields);
-        }
-        if (!execution.ok) {
-          return context.json(execution.body, execution.status);
-        }
-        if (!isValidSuccessBody(execution.body)) {
-          return context.json(
-            { status: "error", code: "INVALID_RECONCILIATION_RESULT" },
-            502,
-          );
-        }
+          code: "RECONCILIATION_SUCCEEDED",
+          issueCount: 0,
+        });
         if (caller === "button") {
           lastSuccessfulButtonRunAt = now();
         }
@@ -452,6 +496,7 @@ export function createApp(options?: ReconciliationAppOptions): Hono<AppEnvironme
             caller,
             status: 409,
             code: "RECONCILIATION_CONFLICT",
+            reason: "RECONCILIATION_SOURCE_OR_TARGET_CHANGED",
             durationMs: Math.max(
               0,
               Math.round(performance.now() - runStartedAt),
@@ -470,6 +515,7 @@ export function createApp(options?: ReconciliationAppOptions): Hono<AppEnvironme
             caller,
             status,
             code: "TRELLO_UPSTREAM_FAILURE",
+            upstreamStatus: error.status,
             durationMs: Math.max(
               0,
               Math.round(performance.now() - runStartedAt),

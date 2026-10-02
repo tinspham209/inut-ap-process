@@ -6,7 +6,10 @@ import {
   parseAmazingFieldsConfig,
 } from "./trello/amazing-fields.js";
 import { reconcilePaidCards } from "./domain/reconcile.js";
-import type { PaidCardInput } from "./domain/paid-card.js";
+import type {
+  PaidCardInput,
+  PaidCardIssue,
+} from "./domain/paid-card.js";
 import {
   renderResultDescription,
   ResultCardDescriptionLimitError,
@@ -265,6 +268,45 @@ function apiFailure(
   };
 }
 
+const loggableIssueFields = new Set([
+  "Tiêu đề",
+  "Số tiền",
+  "Loại chi phí",
+  "Hình thức thanh toán",
+  "Ngày thanh toán",
+  "Amazing Fields",
+]);
+
+function summarizeIssuesForLog(issues: readonly PaidCardIssue[]): string {
+  const counts = new Map<string, number>();
+  for (const issue of issues) {
+    if (!loggableIssueFields.has(issue.field)) {
+      continue;
+    }
+    const key = `${issue.field}:${issue.reason}`;
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  return [...counts.entries()]
+    .sort(([first], [second]) => first.localeCompare(second))
+    .map(([key, count]) => `${key}=${count}`)
+    .join(";");
+}
+
+function safeErrorName(error: unknown): string {
+  const name = error instanceof Error ? error.name : "Error";
+  return [
+    "AbortError",
+    "Error",
+    "RangeError",
+    "ReconciliationConflictError",
+    "SyntaxError",
+    "TrelloApiError",
+    "TypeError",
+  ].includes(name)
+    ? name
+    : "Error";
+}
+
 export async function executeReconciliation(
   options: ReconciliationServiceOptions,
 ): Promise<ReconciliationExecution> {
@@ -298,7 +340,12 @@ export async function executeReconciliation(
       issueCount?: number;
       paidCardCount?: number;
       notificationStatus?: string;
+      notificationReason?: string;
+      notificationAttempts?: number;
       upstreamStatus?: number;
+      errorName?: string;
+      issueSummary?: string;
+      archivedPaidCount?: number;
     } = {},
   ): void => {
     const level =
@@ -334,7 +381,10 @@ export async function executeReconciliation(
             code: "TRELLO_UPSTREAM_FAILURE",
             upstreamStatus: error.status,
           }
-        : { code: "RECONCILIATION_FAILED" },
+      : {
+          code: "RECONCILIATION_FAILED",
+          errorName: safeErrorName(error),
+        },
     );
     if (error instanceof TrelloApiError) {
       return upstreamFailure(error);
@@ -367,7 +417,10 @@ export async function executeReconciliation(
       "amazing_fields_config",
       configStartedAt,
       "failed",
-      { code: "CONFIGURATION_CHECK_FAILED" },
+      {
+        code: "CONFIGURATION_CHECK_FAILED",
+        errorName: safeErrorName(error),
+      },
     );
     throw error;
   }
@@ -416,6 +469,7 @@ export async function executeReconciliation(
       {
         code: "RECONCILIATION_FAILED",
         paidCardCount: paidCards.length,
+        errorName: safeErrorName(error),
       },
     );
     throw error;
@@ -434,6 +488,12 @@ export async function executeReconciliation(
       code: result.ok ? "RECONCILIATION_SUCCEEDED" : result.code,
       issueCount: result.ok ? 0 : result.issues.length,
       paidCardCount: paidCards.length,
+      ...(!result.ok && result.code === "INVALID_PAID_CARD_DATA"
+        ? { issueSummary: summarizeIssuesForLog(result.issues) }
+        : {}),
+      ...(!result.ok && result.code === "ARCHIVED_PAID_CARD"
+        ? { archivedPaidCount: result.archivedPaidCards.length }
+        : {}),
     },
   );
   if (!result.ok) {
@@ -446,12 +506,15 @@ export async function executeReconciliation(
           result.issues,
           asOf,
         );
-      } catch {
+      } catch (error) {
         stageCompleted(
           "telegram_notification",
           notificationStartedAt,
           "failed",
-          { code: "TELEGRAM_NOTIFICATION_FAILED" },
+          {
+            code: "TELEGRAM_NOTIFICATION_FAILED",
+            errorName: safeErrorName(error),
+          },
         );
         throw new Error("Telegram notification failed");
       }
@@ -465,6 +528,13 @@ export async function executeReconciliation(
               ? "PAID_DATA_NOTIFICATION_SENT"
               : "TELEGRAM_NOTIFICATION_FAILED",
           notificationStatus: notification.status,
+          ...(notification.reason
+            ? { notificationReason: notification.reason }
+            : {}),
+          notificationAttempts: notification.attempts,
+          ...(notification.upstreamStatus
+            ? { upstreamStatus: notification.upstreamStatus }
+            : {}),
           issueCount: result.issues.length,
         },
       );
@@ -545,7 +615,10 @@ export async function executeReconciliation(
         "result_card_write",
         resultWriteStartedAt,
         "failed",
-        { code: "RECONCILIATION_FAILED" },
+        {
+          code: "RECONCILIATION_FAILED",
+          errorName: safeErrorName(error),
+        },
       );
     }
     throw error;

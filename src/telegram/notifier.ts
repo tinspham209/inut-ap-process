@@ -31,6 +31,8 @@ export interface TelegramNotificationResult {
   status: "sent" | "failed";
   omittedCardCount: number;
   totalInvalidCardCount: number;
+  attempts: number;
+  upstreamStatus?: number;
   reason?: TelegramNotificationFailureReason;
 }
 
@@ -242,7 +244,10 @@ export async function notifyPaidDataIssues(
   );
 
   let failureReason: TelegramNotificationFailureReason = "upstream_failure";
+  let lastUpstreamStatus: number | undefined;
+  let attempts = 0;
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    attempts = attempt;
     let response: Response;
     try {
       response = await fetchImpl(endpoint, {
@@ -267,6 +272,7 @@ export async function notifyPaidDataIssues(
     }
 
     if (response.status === 429 || response.status >= 500) {
+      lastUpstreamStatus = response.status;
       failureReason = "upstream_failure";
       if (attempt < maxAttempts) {
         const delay = retryDelay(
@@ -287,6 +293,7 @@ export async function notifyPaidDataIssues(
       break;
     }
     if (!response.ok) {
+      lastUpstreamStatus = response.status;
       failureReason = "upstream_failure";
       break;
     }
@@ -300,6 +307,8 @@ export async function notifyPaidDataIssues(
         reason: "invalid_response",
         omittedCardCount: formatted.omittedCardCount,
         totalInvalidCardCount: formatted.totalInvalidCardCount,
+        attempts,
+        upstreamStatus: response.status,
       };
     }
     if (
@@ -313,12 +322,16 @@ export async function notifyPaidDataIssues(
         reason: "invalid_response",
         omittedCardCount: formatted.omittedCardCount,
         totalInvalidCardCount: formatted.totalInvalidCardCount,
+        attempts,
+        upstreamStatus: response.status,
       };
     }
     return {
       status: "sent",
       omittedCardCount: formatted.omittedCardCount,
       totalInvalidCardCount: formatted.totalInvalidCardCount,
+      attempts,
+      upstreamStatus: response.status,
     };
   }
 
@@ -327,5 +340,9 @@ export async function notifyPaidDataIssues(
     reason: failureReason,
     omittedCardCount: formatted.omittedCardCount,
     totalInvalidCardCount: formatted.totalInvalidCardCount,
+    attempts,
+    ...(lastUpstreamStatus === undefined
+      ? {}
+      : { upstreamStatus: lastUpstreamStatus }),
   };
 }

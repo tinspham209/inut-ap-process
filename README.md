@@ -100,6 +100,10 @@ and duration. Reconciliation logs include only caller type, stage
 (`trello_read`, `amazing_fields_config`, `paid_card_validation`,
 `telegram_notification` or `result_card_write`), duration, outcome code,
 upstream HTTP status when available, card/issue counts and notification status.
+For invalid Paid data, logs include aggregated field/reason counts only (not
+card identities or entered values); archived Paid is logged as a count.
+Request rejections include a safe reason code, and Telegram failures include
+the failure category, attempt count, and upstream HTTP status when available.
 Authorization headers, query strings, request/response bodies, field values,
 card URLs, pluginData and exception messages are not logged. Use the request ID
 and safe error code to correlate a failure with its HTTP response.
@@ -133,7 +137,7 @@ the result-card description is written and verified; it includes `month`,
 
 | Status | Meaning |
 | --- | --- |
-| `400` | Non-empty or malformed request |
+| `400` | Body is not empty/`{}`, or request is malformed |
 | `401` | Missing or invalid authorization |
 | `409` | A reconciliation is already running or a checked source/target changed |
 | `422` | Invalid Paid-card data or archived Paid card |
