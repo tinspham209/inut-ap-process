@@ -22,9 +22,26 @@ cp .env.example .env
 
 Populate `.env` privately with the required test-board values. Do not paste
 secrets into chat, command arguments, issue text, logs, or URLs. `.env` is
-ignored by Git; `.env.example` contains names only. `pnpm dev` and `pnpm start`
-load `.env` locally and fail fast if required configuration is missing or the
-cron and button secrets are identical.
+ignored by Git; `.env.example` contains names only. `pnpm dev` loads `.env` for
+local development. `pnpm start` uses the process environment supplied by the
+hosting platform; use `pnpm start:local` to run the built server locally with
+`.env`. The server fails fast if required configuration is missing or the cron
+and button secrets are identical.
+
+### Render service commands
+
+In Render's **Settings → Build & Deploy**, use:
+
+```sh
+Build Command: pnpm install --frozen-lockfile && pnpm run build
+Start Command: pnpm start
+```
+
+Add the required variables from `.env.example` in the Render service's
+**Environment** settings. Render supplies them to the process; do not upload or
+commit a `.env` file. Render also supplies `PORT`. After saving environment
+variables or commands, redeploy the service. `pnpm dev` is only for local
+watch-mode development and should not be the Render Start Command.
 
 The Vercel-compatible Hono entry is `src/index.ts`, which default-exports the
 configured app. Local Node serving is isolated in `src/server.ts` and is used
