@@ -26,6 +26,14 @@ ignored by Git; `.env.example` contains names only. `pnpm dev` and `pnpm start`
 load `.env` locally and fail fast if required configuration is missing or the
 cron and button secrets are identical.
 
+The Vercel-compatible Hono entry is `src/index.ts`, which default-exports the
+configured app. Local Node serving is isolated in `src/server.ts` and is used
+by `pnpm dev` / `pnpm start`. This entry-point refactor alone does not make
+Vercel deployment safe: the reconciliation lock, cooldown, and Trello rate
+limiter are still process-local. Do not deploy the service to a horizontally
+scaled/serverless setup until those global coordination requirements are
+addressed or the deployment is otherwise constrained to one instance.
+
 Local code verification uses synthetic fixtures and fake Trello/Telegram HTTP;
 it does not read production data or send messages:
 
