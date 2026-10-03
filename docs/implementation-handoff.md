@@ -6,7 +6,7 @@
 - Chủ board báo đã thử qua localhost và xác nhận bố cục kết quả trông đúng, gồm `Cập nhật` ngay dưới `Tháng báo cáo` và các dòng tổng theo hạng mục. Không lưu ảnh chụp, số tiền hoặc tên hạng mục thực tế trong repo.
 - **P10 vẫn chưa hoàn tất:** chủ board báo service đã lên production, nút thủ công, trigger vào Paid và cron 19:00 giờ Việt Nam hoạt động; cold start khoảng 50–60 giây. Hiện Paid-trigger đang dùng button secret; bản code tiếp theo yêu cầu `RECONCILE_PAID_TRIGGER_SECRET` riêng và owner/admin phải cập nhật host cùng Automation header sau deploy. Các bằng chứng hệ thống về deadline/alert/rollback và acceptance còn lại vẫn phải ghi trong [plan](./plan.md); không tự đánh dấu P10 hoàn tất.
 - Kiểm chứng tự động gần nhất: 118 test pass, typecheck và build pass. Read-only Trello preflight và `GET /health` localhost pass; xem [plan](./plan.md) để biết bằng chứng và phần còn thiếu. P10 không được đánh dấu xong chỉ dựa vào mock hoặc ảnh chụp.
-- Yêu cầu tài liệu của người dùng theo thứ tự: (1) nội dung thuyết trình ở [ap-process-presentation-content.md](./ap-process-presentation-content.md); (2) hướng dẫn board ở [ap-process-board-user-guide.md](./ap-process-board-user-guide.md); (3) slide + script. Chỉ làm slide/script khi người dùng yêu cầu file tiếp theo.
+- Các tài liệu người dùng yêu cầu hiện có: nội dung thuyết trình ở [ap-process-presentation-content.md](./ap-process-presentation-content.md), hướng dẫn board ở [ap-process-board-user-guide.md](./ap-process-board-user-guide.md), và deck import Google Slides ở [ap-process-presentation.pptx](./ap-process-presentation.pptx). Chưa tạo script riêng; người dùng dự định thuyết trình dựa trên file nội dung.
 
 ## Snapshot lịch sử trước implement (29/09/2026)
 
