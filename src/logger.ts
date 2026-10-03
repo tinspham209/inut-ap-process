@@ -160,7 +160,9 @@ function isSafeField(key: string, value: string | number | boolean): boolean {
     );
   }
   if (key === "caller") {
-    return value === "button" || value === "cron";
+    return (
+      value === "button" || value === "cron" || value === "paid_trigger"
+    );
   }
   if (key === "method") {
     return (

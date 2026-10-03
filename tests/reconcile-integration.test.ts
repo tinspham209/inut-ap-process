@@ -298,10 +298,11 @@ function createScenario(options: ScenarioOptions = {}) {
     config: {
       reconcileCronSecret: "synthetic-cron-secret",
       reconcileButtonSecret: "synthetic-button-secret",
+      reconcilePaidTriggerSecret: "synthetic-paid-trigger-secret",
     },
     executeReconciliation: execute,
     now: () => 0,
-    logger: createServerLogger(() => {}),
+    logger,
   });
 
   return {
@@ -327,6 +328,12 @@ async function postReconcile(
     method: "POST",
     headers: { Authorization: `Bearer synthetic-${caller}-secret` },
   });
+}
+
+async function postPaidTrigger(app: ReturnType<typeof createApp>) {
+  const headers = new Headers();
+  headers.set("Authorization", "Bearer synthetic-paid-trigger-secret");
+  return app.request("/v1/reconcile", { method: "POST", headers });
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -413,6 +420,22 @@ describe("full reconciliation integration with fake HTTP", () => {
     expect(stageLogs).toContain('"requestId":');
     expect(stageLogs).not.toContain("synthetic-telegram-token");
     expect(stageLogs).not.toContain("synthetic-fd-payload");
+  });
+
+  it("runs through a distinct paid-trigger caller and logs no credential", async () => {
+    const scenario = createScenario({
+      cards: [{ id: "synthetic-paid-trigger-card" }],
+    });
+
+    const response = await postPaidTrigger(scenario.app);
+    const body = await response.json();
+    const logs = scenario.state.logs.join("\n");
+
+    expect(response.status).toBe(200);
+    expect(body).toMatchObject({ status: "success", totalSpentVnd: 2_000_000 });
+    expect(scenario.state.putTargets).toHaveLength(1);
+    expect(logs).toContain('"caller":"paid_trigger"');
+    expect(logs).not.toContain("synthetic-paid-trigger-secret");
   });
 
   it("includes Paid cards found on a later board-card page", async () => {

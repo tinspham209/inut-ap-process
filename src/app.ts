@@ -32,7 +32,9 @@ export type ReconciliationExecution =
 export interface ReconciliationAppOptions {
   config: Pick<
     AppConfig,
-    "reconcileCronSecret" | "reconcileButtonSecret"
+    | "reconcileCronSecret"
+    | "reconcileButtonSecret"
+    | "reconcilePaidTriggerSecret"
   >;
   executeReconciliation: (requestId: string) => Promise<ReconciliationExecution>;
   checkConfiguration?: () => Promise<ConfigCheckResult>;
@@ -267,6 +269,10 @@ export function createApp(options?: ReconciliationAppOptions): Hono<AppEnvironme
         secureSecretMatch(
           authorization,
           options.config.reconcileButtonSecret,
+        ) ||
+        secureSecretMatch(
+          authorization,
+          options.config.reconcilePaidTriggerSecret,
         );
       if (!authorized) {
         return context.json(
@@ -349,7 +355,12 @@ export function createApp(options?: ReconciliationAppOptions): Hono<AppEnvironme
               options.config.reconcileButtonSecret,
             )
           ? "button"
-          : undefined;
+          : secureSecretMatch(
+                authorization,
+                options.config.reconcilePaidTriggerSecret,
+              )
+            ? "paid_trigger"
+            : undefined;
       if (!caller) {
         const requestId = context.get("requestId");
         const reason = authorization

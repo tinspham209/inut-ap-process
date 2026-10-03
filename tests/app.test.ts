@@ -9,6 +9,7 @@ import { createServerLogger, type LogLevel } from "../src/logger.js";
 const config = {
   reconcileCronSecret: "synthetic-cron-secret",
   reconcileButtonSecret: "synthetic-button-secret",
+  reconcilePaidTriggerSecret: "synthetic-paid-trigger-secret",
 };
 
 const successBody: ReconciliationSuccessBody = {
@@ -226,6 +227,56 @@ describe("reconciliation HTTP API", () => {
     const running = pending.request("/v1/reconcile", {
       method: "POST",
       headers: authorization(config.reconcileCronSecret),
+    });
+    await Promise.resolve();
+    const overlapping = await pending.request("/v1/reconcile", {
+      method: "POST",
+      headers: authorization(config.reconcileButtonSecret),
+    });
+    expect(overlapping.status).toBe(409);
+    release(successExecution);
+    expect((await running).status).toBe(200);
+  });
+
+  it("lets paid-trigger bypass button cooldown but keeps the shared run lock", async () => {
+    let now = 0;
+    const execute = vi.fn(async () => {
+      now += 100;
+      return successExecution;
+    });
+    const app = createTestApp(execute, () => now);
+
+    const button = await app.request("/v1/reconcile", {
+      method: "POST",
+      headers: authorization(config.reconcileButtonSecret),
+    });
+    expect(button.status).toBe(200);
+
+    const paidTrigger = await app.request("/v1/reconcile", {
+      method: "POST",
+      headers: authorization(config.reconcilePaidTriggerSecret),
+    });
+    expect(paidTrigger.status).toBe(200);
+    expect(execute).toHaveBeenCalledTimes(2);
+
+    const buttonDuringCooldown = await app.request("/v1/reconcile", {
+      method: "POST",
+      headers: authorization(config.reconcileButtonSecret),
+    });
+    expect(buttonDuringCooldown.status).toBe(429);
+    expect(execute).toHaveBeenCalledTimes(2);
+
+    let release: (value: ReconciliationExecution) => void = () => {};
+    const pending = createTestApp(
+      () =>
+        new Promise<ReconciliationExecution>((resolve) => {
+          release = resolve;
+        }),
+      () => now,
+    );
+    const running = pending.request("/v1/reconcile", {
+      method: "POST",
+      headers: authorization(config.reconcilePaidTriggerSecret),
     });
     await Promise.resolve();
     const overlapping = await pending.request("/v1/reconcile", {
@@ -460,6 +511,12 @@ describe("reconciliation HTTP API", () => {
     });
     expect(execute).not.toHaveBeenCalled();
     expect(checkConfiguration).toHaveBeenCalledTimes(1);
+
+    const paidTriggerResponse = await app.request("/v1/config-check", {
+      headers: authorization(config.reconcilePaidTriggerSecret),
+    });
+    expect(paidTriggerResponse.status).toBe(200);
+    expect(checkConfiguration).toHaveBeenCalledTimes(2);
   });
 
   it("reports safe check codes when configuration verification fails", async () => {

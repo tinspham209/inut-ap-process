@@ -7,6 +7,7 @@ const requiredEnvironmentVariables = [
   "AMAZING_FIELDS_PLUGIN_ID",
   "RECONCILE_CRON_SECRET",
   "RECONCILE_BUTTON_SECRET",
+  "RECONCILE_PAID_TRIGGER_SECRET",
   "TELEGRAM_BOT_TOKEN",
   "TELEGRAM_CHAT_ID",
 ] as const;
@@ -23,6 +24,7 @@ export interface AppConfig {
   amazingFieldsPluginId: string;
   reconcileCronSecret: string;
   reconcileButtonSecret: string;
+  reconcilePaidTriggerSecret: string;
   telegramBotToken: string;
   telegramChatId: string;
   port: number;
@@ -48,9 +50,16 @@ export function loadConfig(env: NodeJS.ProcessEnv): AppConfig {
 
   const reconcileCronSecret = required("RECONCILE_CRON_SECRET");
   const reconcileButtonSecret = required("RECONCILE_BUTTON_SECRET");
-  if (reconcileCronSecret === reconcileButtonSecret) {
+  const reconcilePaidTriggerSecret = required("RECONCILE_PAID_TRIGGER_SECRET");
+  if (
+    new Set([
+      reconcileCronSecret,
+      reconcileButtonSecret,
+      reconcilePaidTriggerSecret,
+    ]).size !== 3
+  ) {
     throw new Error(
-      "RECONCILE_CRON_SECRET and RECONCILE_BUTTON_SECRET must be different",
+      "RECONCILE_CRON_SECRET, RECONCILE_BUTTON_SECRET, and RECONCILE_PAID_TRIGGER_SECRET must be different",
     );
   }
 
@@ -69,6 +78,7 @@ export function loadConfig(env: NodeJS.ProcessEnv): AppConfig {
     amazingFieldsPluginId: required("AMAZING_FIELDS_PLUGIN_ID"),
     reconcileCronSecret,
     reconcileButtonSecret,
+    reconcilePaidTriggerSecret,
     telegramBotToken: required("TELEGRAM_BOT_TOKEN"),
     telegramChatId: required("TELEGRAM_CHAT_ID"),
     port,

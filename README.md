@@ -8,8 +8,10 @@ accounting data in a database.
 
 The implementation follows [the technical specification](docs/specs.md),
 [clarifications](docs/clarification.md), and the ordered
-[implementation plan](docs/plan.md). This runbook does not authorize a live
-board write, Telegram send, scheduled trigger, or production deployment.
+[implementation plan](docs/plan.md). The owner reports that the production
+manual button, on-Paid trigger, and 19:00 Vietnam-time cron are active. This
+runbook does not authorize changing source Paid cards, credentials, or trigger
+configuration.
 
 ## Local setup
 
@@ -129,11 +131,19 @@ or the empty JSON object `{}` (Trello Automation's default); do not send fields:
 | Manual Trello button | `Bearer <RECONCILE_BUTTON_SECRET>` |
 | Cron | `Bearer <RECONCILE_CRON_SECRET>` |
 
-Do not send the caller type in a query parameter or request body. Cron and
-button secrets are independent. A successful response is returned only after
+Do not send the caller type in a query parameter or request body. Cron, button,
+and paid-trigger secrets must be distinct. A successful response is returned only after
 the result-card description is written and verified; it includes `month`,
 `asOf`, `totalSpentVnd`, `cashSpentVnd`, `bankTransferSpentVnd`, and
 `updatedCardUrl`.
+
+When deploying the paid-trigger caller update, configure
+`RECONCILE_PAID_TRIGGER_SECRET` in the host and update the Trello Automation
+that fires on entry to `Paid` to use it. The paid-trigger caller bypasses the
+manual button cooldown but shares the in-progress lock. Until that release and
+header change are deployed, the current automation continues to use the button
+caller and its 60-second cooldown. Do not manually press `Trigger Get Total`
+for every card; check the result card's `Cập nhật` line.
 
 | Status | Meaning |
 | --- | --- |
@@ -183,6 +193,10 @@ Comment every list move, including reversals. Comments and assignments are audit
 and reminder mechanisms, not accounting inputs or proof that the API can
 enforce role permissions.
 
+For click-by-click board instructions, Power-Up authorization, correct ticket
+creation, labels, and the update triggers, see the
+[AP Process board user guide](docs/ap-process-board-user-guide.md).
+
 ## Operations and rollback
 
 - Cron schedule: 19:00 `Asia/Ho_Chi_Minh` daily (12:00 UTC). Keep credentials in
@@ -200,22 +214,25 @@ enforce role permissions.
 
 Mock tests and read-only probes do not establish:
 
-- A host with HTTPS, one persistent instance, and a verified request deadline.
+- Evidence that the currently used HTTPS host runs one instance and has a
+  request deadline sufficient for the actual Paid-card count.
 - Authenticated button/cron behavior, real host/cron duration at the expected
   Paid-card count, and the cron provider's HTTP-failure alert.
 - Operator access to the full issue list when Telegram truncates its summary.
 - Any outstanding evidence for G01–G05/G07; owner decisions for G06/G08/A05
   and the reported G09 UI observation are recorded in `docs/plan.md`.
 
-The owner authorized limited local/test-board checks that update only the
-configured result-card description after read-only preflight. This does not
-authorize edits to Paid source cards, production writes, or enabling recurring
-cron/Automation. The owner reports that the local result-card display and
-human workflow/accounting checks look good; the shared screenshot is not stored
-here because it contains financial data. Do not send live Telegram alerts
-unless separately approved for the private test chat.
+The owner reports that the local result-card display and human
+workflow/accounting checks look good, and that the production manual button,
+move-to-Paid trigger, and daily cron are active. An idle host may take about
+50–60 seconds to cold-start; allow up to 3 minutes before reporting a missing
+update. The shared screenshot is not stored here because it contains financial
+data. Do not add, edit, archive, or delete Paid source cards for testing; do not
+change production triggers or send extra Telegram alerts without separate
+approval.
 
-Do not enable production until the remaining gates are resolved. If read-only
-preflight finds an archived Paid card, stop and ask the board owner to restore
-the test fixture; the service never changes its status. Never archive or delete
-a Paid card for test cleanup.
+Remaining system-acceptance evidence is tracked in `docs/plan.md`; do not treat
+owner-reported trigger status as proof of every host, alert, timing, or rollback
+check. If read-only preflight finds an archived Paid card, stop and ask the board
+owner to restore the fixture; the service never changes its status. Never
+archive or delete a Paid card for test cleanup.

@@ -50,4 +50,16 @@ describe("server logger", () => {
     expect(output).not.toContain("synthetic-sensitive-caller");
     expect(output).toContain('"event":"http.request.completed"');
   });
+
+  it("allows the paid-trigger caller label without exposing credentials", () => {
+    const lines: string[] = [];
+    const logger = createServerLogger((_level, line) => lines.push(line));
+
+    logger.info("reconciliation.started", {
+      caller: "paid_trigger",
+      requestId: "f50a8ad0-ec84-4c5d-93af-2eaa91c2fd1a",
+    });
+
+    expect(lines.join("\n")).toContain('"caller":"paid_trigger"');
+  });
 });

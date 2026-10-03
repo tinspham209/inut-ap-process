@@ -10,6 +10,7 @@ const syntheticEnvironment = {
   AMAZING_FIELDS_PLUGIN_ID: "synthetic-plugin-id",
   RECONCILE_CRON_SECRET: "synthetic-cron-secret",
   RECONCILE_BUTTON_SECRET: "synthetic-button-secret",
+  RECONCILE_PAID_TRIGGER_SECRET: "synthetic-paid-trigger-secret",
   TELEGRAM_BOT_TOKEN: "synthetic-bot-token",
   TELEGRAM_CHAT_ID: "synthetic-chat-id",
   PORT: "43130",

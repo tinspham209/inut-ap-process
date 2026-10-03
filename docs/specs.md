@@ -1,6 +1,6 @@
 # Đặc tả kỹ thuật: Theo dõi chi phí đã thanh toán trên Trello
 
-**Trạng thái:** Bản nghiệp vụ trước đó đã được Kế toán duyệt; các bổ sung của chủ board trong [clarification.md](./clarification.md) được cập nhật tại đây để Kế toán xem lại. Chức năng chưa triển khai. [Bản dành cho Kế toán](./specs-ke-toan.md).
+**Trạng thái:** Đây là contract kỹ thuật hiện hành. P01–P09 đã triển khai. Chủ board báo nút thủ công, trigger khi vào Paid và cron 19:00 giờ Việt Nam đang hoạt động trên production; bằng chứng nghiệm thu host còn được theo dõi trong [plan.md](./plan.md), P10 chưa hoàn tất. [Bản dành cho Kế toán](./specs-ke-toan.md).
 
 ## 1. Mục tiêu và phạm vi
 
@@ -58,9 +58,9 @@ Trong description, `Cập nhật: <dd/MM/yyyy HH:mm>` nằm ngay dưới `Tháng
 
 ## 5. API, giới hạn bấm nút và ghi kết quả
 
-Hono cung cấp HTTPS `POST /v1/reconcile`; cron-job.org gọi lúc **19:00 giờ Việt Nam mỗi ngày** (12:00 UTC), nút board/card Trello gọi khi cần xem ngay. `GET /health` không tính hoặc ghi dữ liệu. **Hai secret riêng** ở header `Authorization`: `RECONCILE_CRON_SECRET` cho cron và `RECONCILE_BUTTON_SECRET` cho nút; không tin query/body tự khai nguồn gọi để miễn giới hạn. Trello API key/token riêng; không truyền bất kỳ secret nào qua URL/payload/log.
+Hono cung cấp HTTPS `POST /v1/reconcile`; Trello Automation gọi khi card được chuyển vào `Paid`, cron-job.org gọi lúc **19:00 giờ Việt Nam mỗi ngày** (12:00 UTC), và nút board `Trigger Get Total` gọi khi cần cập nhật thủ công. Mỗi trigger có secret riêng trong header `Authorization`: `RECONCILE_PAID_TRIGGER_SECRET` phân loại request là `paid_trigger`, `RECONCILE_BUTTON_SECRET` cho nút và `RECONCILE_CRON_SECRET` cho cron. Ba secret phải khác nhau. Trigger Paid bypass cooldown 60 giây của nút nhưng dùng chung in-flight lock; nếu một lượt khác đang chạy, trả 409, không queue. Nút giữ cooldown 60 giây; cron bypass cooldown nút; cả ba cùng bị chặn chạy chồng. Log chỉ ghi caller type, không ghi secret. `GET /health` không tính hoặc ghi dữ liệu. Không tin query/body tự khai nguồn gọi để bỏ giới hạn; Trello API key/token riêng; không truyền bất kỳ secret nào qua URL/payload/log.
 
-**Nút thủ công:** tối đa **một lượt thành công mỗi 60 giây trên toàn board**, cooldown bắt đầu lúc lượt thành công hoàn tất. Yêu cầu nút trong cooldown trả `429` và `Retry-After` (giây còn lại), **không đọc Trello, không ghi card, không gửi Telegram**. Một lượt đang chạy dở không được chạy chồng: trả `409` cho lượt đến sau (kể cả cron). Lượt thất bại **không tạo cooldown** để người dùng sửa dữ liệu rồi thử lại; nếu liên tục gọi khi vẫn sai có thể phát nhiều Telegram, cần lưu ý vận hành. Secret cron miễn cooldown nút, **không** miễn quy tắc chống chạy chồng. Chỉ lưu metadata thời gian/cooldown tạm trong bộ nhớ, không lưu dữ liệu kế toán; một instance hoặc tầng rate-limit dùng chung là điều kiện để giới hạn chính xác khi deploy.
+**Nút thủ công:** tối đa **một lượt thành công mỗi 60 giây trên toàn board**, cooldown bắt đầu lúc lượt thành công hoàn tất. Yêu cầu nút trong cooldown trả `429` và `Retry-After` (giây còn lại), **không đọc Trello, không ghi card, không gửi Telegram**. Paid-trigger không chịu cooldown nút, nhưng lượt đang chạy dở không được chạy chồng: trigger đến sau trả `409`; không có queue/retry tự động. Cron cũng bypass cooldown nút nhưng vẫn chung in-flight lock. Lượt thất bại **không tạo cooldown** để người dùng sửa dữ liệu rồi thử lại; nếu liên tục gọi khi vẫn sai có thể phát nhiều Telegram, cần lưu ý vận hành. Chỉ lưu metadata thời gian/cooldown tạm trong bộ nhớ, không lưu dữ liệu kế toán; một instance hoặc tầng rate-limit dùng chung là điều kiện để giới hạn chính xác khi deploy.
 
 Sau khi đọc và kiểm tra đầy đủ, chỉ cập nhật các dòng do service quản lý trong description card `Tổng chi trong tháng`, giữ nguyên nội dung ngoài phần service quản lý. Ngoài năm dòng cố định, vùng hạng mục gồm heading cố định và các dòng hạng mục phát sinh theo option hiện hành:
 
@@ -98,7 +98,7 @@ Gửi **một tin Telegram tổng hợp/lượt lỗi** đến chat vận hành:
 
 Gửi Telegram qua HTTPS với timeout và retry hữu hạn khi lỗi tạm thời. Nếu Telegram lỗi, vẫn giữ mã lỗi dữ liệu gốc `422`, trả `notification.status: "failed"` và ghi lỗi có kiểm soát; gửi được thì `"sent"`. Cron-job.org cần bật cảnh báo khi HTTP thất bại làm kênh dự phòng. `429`/`409` do bấm nút nhanh/chạy chồng **không phải lỗi field**, không gửi Telegram. Lỗi hạ tầng/API khác giữ mã lỗi phù hợp; Telegram **bắt buộc với lỗi field Paid** chứ không mặc định gửi với mọi lỗi. Lỗi archived Paid phải trả lỗi rõ card để khôi phục; không được xuất bản số mới. Secret Telegram chỉ từ env: `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` do chủ board điền; thiếu cấu hình là lỗi phải hiện rõ, không âm thầm bỏ qua. Không có DB bền vững để chống gửi trùng giữa các lượt lỗi độc lập.
 
-Env tối thiểu: `TRELLO_API_KEY`, `TRELLO_API_TOKEN`, `TRELLO_BOARD_ID`, `TRELLO_PAID_LIST_ID`, `TRELLO_RESULT_CARD_ID`, `AMAZING_FIELDS_PLUGIN_ID`, `RECONCILE_CRON_SECRET`, `RECONCILE_BUTTON_SECRET`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `PORT` nếu host yêu cầu. Không commit credentials, không lưu dữ liệu kế toán vào DB/file/field khác.
+Env tối thiểu: `TRELLO_API_KEY`, `TRELLO_API_TOKEN`, `TRELLO_BOARD_ID`, `TRELLO_PAID_LIST_ID`, `TRELLO_RESULT_CARD_ID`, `AMAZING_FIELDS_PLUGIN_ID`, `RECONCILE_CRON_SECRET`, `RECONCILE_BUTTON_SECRET`, `RECONCILE_PAID_TRIGGER_SECRET`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `PORT` nếu host yêu cầu. Không commit credentials, không lưu dữ liệu kế toán vào DB/file/field khác.
 
 ## 7. Tiêu chí nghiệm thu và giai đoạn dashboard
 

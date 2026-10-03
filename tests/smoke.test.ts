@@ -12,6 +12,7 @@ const requiredEnv = {
   AMAZING_FIELDS_PLUGIN_ID: "test-plugin-id",
   RECONCILE_CRON_SECRET: "test-cron-secret",
   RECONCILE_BUTTON_SECRET: "test-button-secret",
+  RECONCILE_PAID_TRIGGER_SECRET: "test-paid-trigger-secret",
   TELEGRAM_BOT_TOKEN: "test-bot-token",
   TELEGRAM_CHAT_ID: "test-chat-id",
 };
@@ -23,6 +24,7 @@ describe("application smoke checks", () => {
       config: {
         reconcileCronSecret: "synthetic-cron-secret",
         reconcileButtonSecret: "synthetic-button-secret",
+        reconcilePaidTriggerSecret: "synthetic-paid-trigger-secret",
       },
       executeReconciliation: async () => {
         throw new Error("Health must not execute reconciliation");
@@ -49,13 +51,39 @@ describe("application smoke checks", () => {
     expect(() => loadConfig({})).not.toThrow("test-api-key");
   });
 
-  it("rejects identical cron and button secrets", () => {
+  it("requires the paid-trigger secret", () => {
     expect(() =>
       loadConfig({
         ...requiredEnv,
-        RECONCILE_BUTTON_SECRET: requiredEnv.RECONCILE_CRON_SECRET,
+        RECONCILE_PAID_TRIGGER_SECRET: " ",
       }),
-    ).toThrow("must be different");
+    ).toThrow("RECONCILE_PAID_TRIGGER_SECRET");
+  });
+
+  it.each([
+    {
+      name: "cron and button",
+      env: {
+        ...requiredEnv,
+        RECONCILE_BUTTON_SECRET: requiredEnv.RECONCILE_CRON_SECRET,
+      },
+    },
+    {
+      name: "cron and paid-trigger",
+      env: {
+        ...requiredEnv,
+        RECONCILE_PAID_TRIGGER_SECRET: requiredEnv.RECONCILE_CRON_SECRET,
+      },
+    },
+    {
+      name: "button and paid-trigger",
+      env: {
+        ...requiredEnv,
+        RECONCILE_PAID_TRIGGER_SECRET: requiredEnv.RECONCILE_BUTTON_SECRET,
+      },
+    },
+  ])("rejects identical $name secrets", ({ env }) => {
+    expect(() => loadConfig(env)).toThrow("must be different");
   });
 
   it("rejects empty IDs and invalid ports", () => {
@@ -72,6 +100,7 @@ describe("application smoke checks", () => {
       trelloBoardId: "test-board-id",
       trelloPaidListId: "test-paid-list-id",
       trelloResultCardId: "test-result-card-id",
+      reconcilePaidTriggerSecret: "test-paid-trigger-secret",
       port: 3000,
     });
   });

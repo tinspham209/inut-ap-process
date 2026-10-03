@@ -1,6 +1,18 @@
-# Bàn giao ngữ cảnh cho session Implement
+# Bàn giao trạng thái AP Process
 
-**Thời điểm bàn giao:** 29/09/2026 (giờ Việt Nam). **Giai đoạn SDD:** Specs → Clarify → Plan → **Implement (session kế tiếp)**. Chủ board xác nhận [plan](./plan.md) và [test-plan](./test-plan.md) đã ổn. **Chưa viết API, test code, chạy thử host, sửa board hay bật cron/nút trong session này.**
+## Trạng thái hiện tại (03/10/2026)
+
+- **P01–P09 đã triển khai và được đánh dấu hoàn tất** trong [plan](./plan.md); P09 có breakdown theo loại chi phí trong response API và card kết quả. [Specs](./specs.md), [test-plan](./test-plan.md) và [README](../README.md) là tài liệu hiện hành.
+- Chủ board báo đã thử qua localhost và xác nhận bố cục kết quả trông đúng, gồm `Cập nhật` ngay dưới `Tháng báo cáo` và các dòng tổng theo hạng mục. Không lưu ảnh chụp, số tiền hoặc tên hạng mục thực tế trong repo.
+- **P10 vẫn chưa hoàn tất:** chủ board báo service đã lên production, nút thủ công, trigger vào Paid và cron 19:00 giờ Việt Nam hoạt động; cold start khoảng 50–60 giây. Hiện Paid-trigger đang dùng button secret; bản code tiếp theo yêu cầu `RECONCILE_PAID_TRIGGER_SECRET` riêng và owner/admin phải cập nhật host cùng Automation header sau deploy. Các bằng chứng hệ thống về deadline/alert/rollback và acceptance còn lại vẫn phải ghi trong [plan](./plan.md); không tự đánh dấu P10 hoàn tất.
+- Kiểm chứng tự động gần nhất: 118 test pass, typecheck và build pass. Read-only Trello preflight và `GET /health` localhost pass; xem [plan](./plan.md) để biết bằng chứng và phần còn thiếu. P10 không được đánh dấu xong chỉ dựa vào mock hoặc ảnh chụp.
+- Yêu cầu tài liệu của người dùng theo thứ tự: (1) nội dung thuyết trình ở [ap-process-presentation-content.md](./ap-process-presentation-content.md); (2) hướng dẫn board ở [ap-process-board-user-guide.md](./ap-process-board-user-guide.md); (3) slide + script. Chỉ làm slide/script khi người dùng yêu cầu file tiếp theo.
+
+## Snapshot lịch sử trước implement (29/09/2026)
+
+Phần dưới ghi lại trạng thái bàn giao trước khi bắt đầu code, không phải trạng thái repo hiện tại.
+
+**Giai đoạn khi đó:** Specs → Clarify → Plan → Implement (session kế tiếp). Chủ board xác nhận [plan](./plan.md) và [test-plan](./test-plan.md) đã ổn. Tại thời điểm snapshot, chưa viết API, test code, chạy thử host, sửa board hay bật cron/nút.
 
 ## Đọc theo thứ tự khi mở session mới
 
